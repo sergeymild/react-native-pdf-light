@@ -484,23 +484,51 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         val leftEdge = width * edgeRatio
         val rightEdge = width * (1f - edgeRatio)
 
-        // Calculate scroll amount (one viewport height)
         val viewportHeight = height
+        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
 
         when {
             tapX < leftEdge -> {
-                // Left 15% - scroll up
-                val currentOffset = mRecyclerView.computeVerticalScrollOffset()
-                val newOffset = (currentOffset - viewportHeight).coerceAtLeast(0)
-                mRecyclerView.smoothScrollBy(0, newOffset - currentOffset)
+                // Left - scroll up by one viewport
+                val firstVisible = layoutManager.findFirstVisibleItemPosition()
+                val firstView = layoutManager.findViewByPosition(firstVisible)
+
+                if (firstVisible == 0 && firstView != null) {
+                    // At first page - check if we need to show top padding
+                    val currentTop = firstView.top
+                    if (currentTop >= mPaddingTop) {
+                        // Already showing full top padding, nothing to do
+                    } else {
+                        // Scroll to show top padding
+                        val scrollAmount = currentTop - mPaddingTop
+                        mRecyclerView.smoothScrollBy(0, scrollAmount)
+                    }
+                } else {
+                    // Normal scroll up
+                    mRecyclerView.smoothScrollBy(0, -viewportHeight)
+                }
                 onTap("left")
             }
             tapX > rightEdge -> {
-                // Right 15% - scroll down
-                val currentOffset = mRecyclerView.computeVerticalScrollOffset()
-                val maxOffset = mRecyclerView.computeVerticalScrollRange() - viewportHeight
-                val newOffset = (currentOffset + viewportHeight).coerceAtMost(maxOffset)
-                mRecyclerView.smoothScrollBy(0, newOffset - currentOffset)
+                // Right - scroll down by one viewport
+                val lastVisible = layoutManager.findLastVisibleItemPosition()
+                val lastView = layoutManager.findViewByPosition(lastVisible)
+
+                if (lastVisible == mActualPageCount - 1 && lastView != null) {
+                    // At last page - check if we need to show bottom padding
+                    val currentBottom = lastView.bottom
+                    val targetBottom = viewportHeight - mPaddingBottom
+                    if (currentBottom <= targetBottom) {
+                        // Already showing full bottom padding, nothing to do
+                    } else {
+                        // Scroll to show bottom padding
+                        val scrollAmount = currentBottom - targetBottom
+                        mRecyclerView.smoothScrollBy(0, scrollAmount)
+                    }
+                } else {
+                    // Normal scroll down
+                    mRecyclerView.smoothScrollBy(0, viewportHeight)
+                }
                 onTap("right")
             }
             else -> {

@@ -41,17 +41,17 @@ class DrawablePdfView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - React Events
 
-    @objc var onPdfError: RCTBubblingEventBlock?
-    @objc var onPdfLoadComplete: RCTBubblingEventBlock?
-    @objc var onDrawingStart: RCTBubblingEventBlock?
-    @objc var onDrawingEnd: RCTBubblingEventBlock?
-    @objc var onStrokeEnd: RCTBubblingEventBlock?
-    @objc var onStrokeRemoved: RCTBubblingEventBlock?
-    @objc var onStrokesCleared: RCTBubblingEventBlock?
-    @objc var onZoomChange: RCTBubblingEventBlock?
-    @objc var onZoomPanStart: RCTBubblingEventBlock?
-    @objc var onZoomPanEnd: RCTBubblingEventBlock?
-    @objc var onSingleTap: RCTBubblingEventBlock?
+    @objc var onPdfError: RCTDirectEventBlock?
+    @objc var onPdfLoadComplete: RCTDirectEventBlock?
+    @objc var onDrawingStart: RCTDirectEventBlock?
+    @objc var onDrawingEnd: RCTDirectEventBlock?
+    @objc var onStrokeEnd: RCTDirectEventBlock?
+    @objc var onStrokeRemoved: RCTDirectEventBlock?
+    @objc var onStrokesCleared: RCTDirectEventBlock?
+    @objc var onZoomChange: RCTDirectEventBlock?
+    @objc var onZoomPanStart: RCTDirectEventBlock?
+    @objc var onZoomPanEnd: RCTDirectEventBlock?
+    @objc var onSingleTap: RCTDirectEventBlock?
 
     // MARK: - Private State
 

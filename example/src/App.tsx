@@ -49,7 +49,7 @@ export default function App() {
           backgroundColor: '#ffffff',
           edgeTapZone: 30,
           pdfPaddingBottom: 200,
-          pdfPaddingTop: 100,
+          pdfPaddingTop: 200,
           onLoadComplete: handleLoadComplete,
           onPageChange: handlePageChange,
           onZoomChange: handleZoomChange,

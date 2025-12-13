@@ -116,7 +116,11 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         // Calculate scroll amount (one viewport height)
         let viewportHeight = bounds.height
         let currentOffset = scrollView.contentOffset.y
-        let maxOffset = scrollView.contentSize.height * scrollView.zoomScale - viewportHeight
+
+        // Account for content insets (including pdfPaddingTop/Bottom)
+        let inset = scrollView.contentInset
+        let minOffset = -inset.top
+        let maxOffset = scrollView.contentSize.height * scrollView.zoomScale - viewportHeight + inset.bottom
 
       // Use edgeTapZone percentage for left/right scroll zones
       let edgeRatio = edgeTapZone / 100.0
@@ -125,7 +129,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
       if tapLocation.x < leftEdge {
           // Left 15% - scroll up
-          let newOffset = max(0, currentOffset - viewportHeight)
+          let newOffset = max(minOffset, currentOffset - viewportHeight)
           onTap?(["position": "left"])
           UIView.animate(withDuration: 0.3) {
               self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
