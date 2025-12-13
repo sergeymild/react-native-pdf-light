@@ -11,8 +11,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     @objc var minZoom: CGFloat = 1.0 { didSet { updateZoomLimits() } }
     @objc var maxZoom: CGFloat = 3.0 { didSet { updateZoomLimits() } }
     @objc var edgeTapZone: CGFloat = 15.0
-    @objc var paddingTop: CGFloat = 0.0 { didSet { updateContentInset() } }
-    @objc var paddingBottom: CGFloat = 0.0 { didSet { updateContentInset() } }
+    @objc var pdfPaddingTop: CGFloat = 0.0 { didSet { updateContentInset() } }
+    @objc var pdfPaddingBottom: CGFloat = 0.0 { didSet { updateContentInset() } }
 
     @objc var pdfBackgroundColor: UIColor = UIColor(white: 0.2, alpha: 1.0) {
         didSet { updateBackgroundColor() }
@@ -20,12 +20,23 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     // MARK: - React Events
 
-    @objc var onPdfError: RCTBubblingEventBlock?
-    @objc var onPdfLoadComplete: RCTBubblingEventBlock?
-    @objc var onPageChange: RCTBubblingEventBlock?
-    @objc var onZoomChange: RCTBubblingEventBlock?
-    @objc var onTap: RCTBubblingEventBlock?
-    @objc var onMiddleClick: RCTBubblingEventBlock?
+    @objc var onPdfError: RCTDirectEventBlock?
+    @objc var onPdfLoadComplete: RCTDirectEventBlock? {
+        didSet {
+            // Send pending load complete event if PDF was loaded before callback was set
+            if let pending = pendingLoadCompleteEvent {
+                onPdfLoadComplete?(pending)
+                pendingLoadCompleteEvent = nil
+            }
+        }
+    }
+    @objc var onPageChange: RCTDirectEventBlock?
+    @objc var onZoomChange: RCTDirectEventBlock?
+    @objc var onTap: RCTDirectEventBlock?
+    @objc var onMiddleClick: RCTDirectEventBlock?
+
+    // Store load complete event if callback not yet set
+    private var pendingLoadCompleteEvent: [String: Any]?
 
     // MARK: - Private State
 
@@ -222,9 +233,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let verticalInset = max(0, (scrollViewSize.height - scaledContentHeight) / 2)
 
         scrollView.contentInset = UIEdgeInsets(
-            top: verticalInset + paddingTop,
+            top: verticalInset + pdfPaddingTop,
             left: horizontalInset,
-            bottom: verticalInset + paddingBottom,
+            bottom: verticalInset + pdfPaddingBottom,
             right: horizontalInset
         )
     }
@@ -277,11 +288,17 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         updateCollectionViewSize()
 
         // Notify load complete
-        onPdfLoadComplete?([
+        let loadCompleteEvent: [String: Any] = [
             "width": pdfPageWidth,
             "height": pdfPageHeight,
             "pageCount": actualPageCount
-        ])
+        ]
+        if let callback = onPdfLoadComplete {
+            callback(loadCompleteEvent)
+        } else {
+            // Store for later when callback is set (race condition workaround)
+            pendingLoadCompleteEvent = loadCompleteEvent
+        }
     }
 
     // MARK: - UICollectionViewDataSource

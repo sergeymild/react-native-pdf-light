@@ -18,12 +18,23 @@ class PagingPdfView: UIView {
 
     // MARK: - React Events
 
-    @objc var onPdfError: RCTBubblingEventBlock?
-    @objc var onPdfLoadComplete: RCTBubblingEventBlock?
-    @objc var onPageChange: RCTBubblingEventBlock?
-    @objc var onZoomChange: RCTBubblingEventBlock?
-    @objc var onTap: RCTBubblingEventBlock?
-    @objc var onMiddleClick: RCTBubblingEventBlock?
+    @objc var onPdfError: RCTDirectEventBlock?
+    @objc var onPdfLoadComplete: RCTDirectEventBlock? {
+        didSet {
+            // Send pending load complete event if PDF was loaded before callback was set
+            if let pending = pendingLoadCompleteEvent {
+                onPdfLoadComplete?(pending)
+                pendingLoadCompleteEvent = nil
+            }
+        }
+    }
+    @objc var onPageChange: RCTDirectEventBlock?
+    @objc var onZoomChange: RCTDirectEventBlock?
+    @objc var onTap: RCTDirectEventBlock?
+    @objc var onMiddleClick: RCTDirectEventBlock?
+
+    // Store load complete event if callback not yet set
+    private var pendingLoadCompleteEvent: [String: Any]?
 
     // MARK: - Private State
 
@@ -186,11 +197,17 @@ class PagingPdfView: UIView {
         }
 
         // Notify load complete
-        onPdfLoadComplete?([
+        let loadCompleteEvent: [String: Any] = [
             "width": pdfPageWidth,
             "height": pdfPageHeight,
             "pageCount": actualPageCount
-        ])
+        ]
+        if let callback = onPdfLoadComplete {
+            callback(loadCompleteEvent)
+        } else {
+            // Store for later when callback is set (race condition workaround)
+            pendingLoadCompleteEvent = loadCompleteEvent
+        }
     }
 
     private func showPage(_ pageIndex: Int, animated: Bool) {

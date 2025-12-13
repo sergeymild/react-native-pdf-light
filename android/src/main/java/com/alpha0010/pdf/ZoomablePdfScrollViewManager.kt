@@ -37,14 +37,14 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
         view.setEdgeTapZone(zone)
     }
 
-    @ReactProp(name = "paddingTop")
-    fun setPaddingTop(view: ZoomablePdfScrollView, padding: Float) {
-        view.setPaddingTop(padding)
+    @ReactProp(name = "pdfPaddingTop")
+    fun setPdfPaddingTop(view: ZoomablePdfScrollView, padding: Float) {
+        view.setPdfPaddingTop(padding)
     }
 
-    @ReactProp(name = "paddingBottom")
-    fun setPaddingBottom(view: ZoomablePdfScrollView, padding: Float) {
-        view.setPaddingBottom(padding)
+    @ReactProp(name = "pdfPaddingBottom")
+    fun setPdfPaddingBottom(view: ZoomablePdfScrollView, padding: Float) {
+        view.setPdfPaddingBottom(padding)
     }
 
     @ReactProp(name = "pdfBackgroundColor", customType = "Color")

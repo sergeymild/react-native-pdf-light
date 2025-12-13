@@ -277,12 +277,12 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         setBackgroundColor(color)
     }
 
-    fun setPaddingTop(padding: Float) {
+    fun setPdfPaddingTop(padding: Float) {
         mPaddingTop = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
         updateRecyclerViewPadding()
     }
 
-    fun setPaddingBottom(padding: Float) {
+    fun setPdfPaddingBottom(padding: Float) {
         mPaddingBottom = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
         updateRecyclerViewPadding()
     }

@@ -8,12 +8,12 @@ RCT_EXPORT_VIEW_PROPERTY(maxZoom, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(edgeTapZone, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(pdfBackgroundColor, UIColor)
 
-RCT_EXPORT_VIEW_PROPERTY(onPdfError, RCTBubblingEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onPdfLoadComplete, RCTBubblingEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onPageChange, RCTBubblingEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onZoomChange, RCTBubblingEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onTap, RCTBubblingEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onMiddleClick, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPdfError, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPdfLoadComplete, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPageChange, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onZoomChange, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onTap, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onMiddleClick, RCTDirectEventBlock)
 
 // Commands
 RCT_EXTERN_METHOD(resetZoom:(nonnull NSNumber *)node)

@@ -40,8 +40,8 @@ type NativeZoomablePdfScrollViewProps = {
   minZoom: number;
   maxZoom: number;
   edgeTapZone: number;
-  paddingTop: number;
-  paddingBottom: number;
+  pdfPaddingTop: number;
+  pdfPaddingBottom: number;
   pdfBackgroundColor?: ReturnType<typeof processColor>;
 
   onLayout?: (event: LayoutChangeEvent) => void;
@@ -96,13 +96,13 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    * Extra padding at the top of the scroll content in points. Default: 0.
    * Useful for adding empty space before the first page.
    */
-  paddingTop?: number;
+  pdfPaddingTop?: number;
 
   /**
    * Extra padding at the bottom of the scroll content in points. Default: 0.
    * Useful for adding empty space after the last page.
    */
-  paddingBottom?: number;
+  pdfPaddingBottom?: number;
 
   /**
    * Callback when an error occurs.
@@ -187,8 +187,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
     minZoom = 1,
     maxZoom = 3,
     edgeTapZone = 15,
-    paddingTop = 0,
-    paddingBottom = 0,
+    pdfPaddingTop = 0,
+    pdfPaddingBottom = 0,
     backgroundColor,
     onError,
     onLayout,
@@ -272,8 +272,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
       minZoom={minZoom}
       maxZoom={maxZoom}
       edgeTapZone={Math.max(0, Math.min(50, edgeTapZone))}
-      paddingTop={Math.max(0, paddingTop)}
-      paddingBottom={Math.max(0, paddingBottom)}
+      pdfPaddingTop={Math.max(0, pdfPaddingTop)}
+      pdfPaddingBottom={Math.max(0, pdfPaddingBottom)}
       pdfBackgroundColor={
         backgroundColor ? processColor(backgroundColor) : undefined
       }
