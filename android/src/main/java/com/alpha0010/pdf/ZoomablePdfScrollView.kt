@@ -291,9 +291,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     private fun updateRecyclerViewPadding() {
         // When zoomed, we need extra padding to allow scrolling to see all content
-        // Use a small multiplier to avoid excessive padding
+        // Use different multipliers: smaller for top, larger for bottom
         val zoomExtraTop = if (mScale > 1.01f && height > 0) {
-            (height * (mScale - 1) * 0.25f).toInt()
+            (height * (mScale - 1) * 0.05f).toInt()
         } else 0
         val zoomExtraBottom = if (mScale > 1.01f && height > 0) {
             (height * (mScale - 1) * 0.25f).toInt()
