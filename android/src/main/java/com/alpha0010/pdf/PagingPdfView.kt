@@ -439,8 +439,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
 /**
  * Zoomable page view with vertical scroll using NestedScrollView.
  * Supports pinch-to-zoom and double-tap zoom.
- * In landscape mode (when page fits on screen), page is centered.
- * In portrait mode, page is at top with vertical scroll.
+ * When zoomed, supports both vertical scrolling and horizontal panning.
  */
 @SuppressLint("ClickableViewAccessibility")
 private class ZoomablePageView(context: Context) : FrameLayout(context) {
@@ -459,23 +458,27 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     private val imageView: ImageView
 
     private var scale = 1f
-    private var pivotX = 0f
-    private var pivotY = 0f
+    private var offsetX = 0f  // Horizontal pan offset when zoomed
     private var bgColor = Color.WHITE
 
     private val scaleDetector: ScaleGestureDetector
     private val gestureDetector: GestureDetector
+    private val panDetector: GestureDetector
     private var zoomAnimator: ValueAnimator? = null
+
+    private var isZoomed: Boolean
+        get() = scale > minZoom + 0.01f
+        set(_) {}
 
     init {
         // NestedScrollView for vertical scrolling (works with ViewPager2)
         scrollView = androidx.core.widget.NestedScrollView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             isNestedScrollingEnabled = true
-            isFillViewport = true // Fill viewport to center content when it's smaller than viewport
+            isFillViewport = true
         }
 
-        // ImageView - will be centered when content fits, top-aligned when scrollable
+        // ImageView
         imageView = ImageView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             scaleType = ImageView.ScaleType.FIT_START
@@ -488,19 +491,58 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         // Scale gesture detector for pinch-to-zoom
         scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                pivotX = detector.focusX
-                pivotY = detector.focusY + scrollView.scrollY
                 return true
             }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val newScale = (scale * detector.scaleFactor).coerceIn(minZoom, maxZoom)
                 if (newScale != scale) {
+                    // Get focus point (between fingers) in screen coordinates
+                    val focusX = detector.focusX
+                    val focusY = detector.focusY
+
+                    // Calculate the point in content coordinates before scale
+                    val contentX = (focusX - offsetX) / scale
+                    val contentY = (focusY + scrollView.scrollY) / scale
+
+                    // Update scale
+                    val oldScale = scale
                     scale = newScale
+
+                    // Calculate new horizontal offset to keep focus point stationary
+                    offsetX = focusX - contentX * scale
+
+                    // Calculate new scroll position to keep vertical focus point stationary
+                    val newScrollY = (contentY * scale - focusY).toInt().coerceAtLeast(0)
+
+                    constrainOffset()
                     applyTransform()
+                    updateScrollViewPadding()
+
+                    // Update scroll position
+                    scrollView.scrollTo(0, newScrollY)
+
                     onZoomChange?.invoke(scale)
-                    onZoomStateChange?.invoke(scale > minZoom + 0.01f)
+                    onZoomStateChange?.invoke(isZoomed)
                 }
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                constrainOffset()
+                applyTransform()
+            }
+        })
+
+        // Pan detector for horizontal panning when zoomed
+        panDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (!isZoomed) return false
+
+                // Handle horizontal panning
+                offsetX -= distanceX
+                constrainOffset()
+                applyTransform()
                 return true
             }
         })
@@ -521,7 +563,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 when {
                     tapX < leftEdge -> {
                         // Left zone - scroll up or previous page
-                        if (currentOffset <= 0) {
+                        if (currentOffset <= 0 && offsetX >= 0) {
                             onPreviousPage?.invoke()
                         } else {
                             val newOffset = (currentOffset - viewportHeight).coerceAtLeast(0)
@@ -558,66 +600,103 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     return false
                 }
 
-                if (scale > minZoom + 0.01f) {
+                if (isZoomed) {
                     // Zoom out with animation
-                    animateZoomTo(minZoom, 0f, 0f)
+                    animateZoomTo(minZoom, 0f)
                 } else {
-                    // Zoom in to tap point with animation
+                    // Zoom in with animation
                     val targetScale = ((minZoom + maxZoom) / 2f).coerceAtMost(maxZoom)
-                    animateZoomTo(targetScale, e.x, e.y + scrollView.scrollY)
+                    animateZoomTo(targetScale, 0f)
                 }
                 return true
             }
         })
 
-        // Forward touch events to gesture detectors even when scrollView handles scrolling
+        // Forward touch events to gesture detectors
         scrollView.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
             scaleDetector.onTouchEvent(event)
-            false // Let scrollView also handle the event
+            gestureDetector.onTouchEvent(event)
+            if (isZoomed) {
+                panDetector.onTouchEvent(event)
+            }
+            false // Let scrollView also handle vertical scrolling
+        }
+    }
+
+    private fun constrainOffset() {
+        if (!isZoomed) {
+            offsetX = 0f
+            return
+        }
+
+        val scaledWidth = width * scale
+        val maxOffsetX = 0f
+        val minOffsetX = width - scaledWidth
+
+        offsetX = offsetX.coerceIn(minOffsetX.coerceAtMost(0f), maxOffsetX)
+    }
+
+    private fun updateScrollViewPadding() {
+        // Add extra vertical padding when zoomed to allow full scroll
+        val zoomExtraPadding = if (isZoomed && height > 0) {
+            (height * (scale - 1) * 0.25f).toInt()
+        } else 0
+
+        if (scrollView.paddingBottom != zoomExtraPadding) {
+            scrollView.setPadding(0, 0, 0, zoomExtraPadding)
+            scrollView.clipToPadding = false
         }
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         // Intercept when zoomed or multi-touch
-        return scale > minZoom + 0.01f || ev.pointerCount > 1
+        return isZoomed || ev.pointerCount > 1
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        var handled = scaleDetector.onTouchEvent(event)
-        handled = gestureDetector.onTouchEvent(event) || handled
+        scaleDetector.onTouchEvent(event)
+        gestureDetector.onTouchEvent(event)
 
-        // Let scrollView handle scrolling when not zoomed
-        if (scale <= minZoom + 0.01f && !scaleDetector.isInProgress) {
-            scrollView.onTouchEvent(event)
+        if (isZoomed) {
+            panDetector.onTouchEvent(event)
         }
 
-        return handled || true
+        // Only forward single-pointer events to scrollView (it crashes on multi-touch)
+        if (!scaleDetector.isInProgress && event.pointerCount == 1) {
+            try {
+                scrollView.onTouchEvent(event)
+            } catch (e: IllegalArgumentException) {
+                // Ignore pointer index errors during multi-touch transitions
+            }
+        }
+
+        return true
     }
 
     fun setImage(bitmap: Bitmap?, parentWidth: Int = 0) {
         imageView.setImageBitmap(bitmap)
         // Reset zoom when setting new image
         scale = minZoom
-        pivotX = 0f
-        pivotY = 0f
+        offsetX = 0f
         applyTransform()
+        updateScrollViewPadding()
         requestLayout()
     }
 
     private fun applyTransform() {
-        imageView.pivotX = pivotX
-        imageView.pivotY = pivotY
-        imageView.scaleX = scale
-        imageView.scaleY = scale
+        // Use translation for horizontal pan and scale for zoom
+        scrollView.translationX = offsetX
+        scrollView.scaleX = scale
+        scrollView.scaleY = scale
+        scrollView.pivotX = 0f
+        scrollView.pivotY = 0f
     }
 
-    private fun animateZoomTo(targetScale: Float, targetPivotX: Float, targetPivotY: Float, duration: Long = 300L) {
+    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, duration: Long = 300L) {
         zoomAnimator?.cancel()
 
         val startScale = scale
-        val startPivotX = pivotX
-        val startPivotY = pivotY
+        val startOffsetX = offsetX
 
         zoomAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
@@ -625,18 +704,18 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
             addUpdateListener { animator ->
                 val fraction = animator.animatedValue as Float
                 scale = startScale + (targetScale - startScale) * fraction
-                pivotX = startPivotX + (targetPivotX - startPivotX) * fraction
-                pivotY = startPivotY + (targetPivotY - startPivotY) * fraction
+                offsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
                 applyTransform()
+                updateScrollViewPadding()
                 onZoomChange?.invoke(scale)
-                onZoomStateChange?.invoke(scale > minZoom + 0.01f)
+                onZoomStateChange?.invoke(isZoomed)
             }
             start()
         }
     }
 
     fun resetZoom() {
-        animateZoomTo(minZoom, 0f, 0f)
+        animateZoomTo(minZoom, 0f)
         scrollView.smoothScrollTo(0, 0)
     }
 

@@ -212,6 +212,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.scaleY = mScale
         mRecyclerView.pivotX = 0f
         mRecyclerView.pivotY = 0f
+        // Update padding to allow scrolling to see all zoomed content
+        updateRecyclerViewPadding()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -288,8 +290,25 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     }
 
     private fun updateRecyclerViewPadding() {
-        mRecyclerView.setPadding(0, mPaddingTop, 0, mPaddingBottom)
-        mRecyclerView.clipToPadding = false
+        // When zoomed, we need extra padding to allow scrolling to see all content
+        // Use a small multiplier to avoid excessive padding
+        val zoomExtraTop = if (mScale > 1.01f && height > 0) {
+            (height * (mScale - 1) * 0.25f).toInt()
+        } else 0
+        val zoomExtraBottom = if (mScale > 1.01f && height > 0) {
+            (height * (mScale - 1) * 0.25f).toInt()
+        } else 0
+
+        val newTopPadding = mPaddingTop + zoomExtraTop
+        val newBottomPadding = mPaddingBottom + zoomExtraBottom
+
+        // Only update if padding actually changed
+        if (mRecyclerView.paddingTop != newTopPadding || mRecyclerView.paddingBottom != newBottomPadding) {
+            mRecyclerView.setPadding(0, newTopPadding, 0, newBottomPadding)
+            mRecyclerView.clipToPadding = false
+            // Force layout update
+            mRecyclerView.requestLayout()
+        }
     }
 
     private fun reloadPdf() {
@@ -487,6 +506,10 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         val viewportHeight = height
         val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
 
+        // Get actual padding (includes zoom extra padding)
+        val actualTopPadding = mRecyclerView.paddingTop
+        val actualBottomPadding = mRecyclerView.paddingBottom
+
         when {
             tapX < leftEdge -> {
                 // Left - scroll up by one viewport
@@ -496,11 +519,11 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 if (firstVisible == 0 && firstView != null) {
                     // At first page - check if we need to show top padding
                     val currentTop = firstView.top
-                    if (currentTop >= mPaddingTop) {
+                    if (currentTop >= actualTopPadding) {
                         // Already showing full top padding, nothing to do
                     } else {
                         // Scroll to show top padding
-                        val scrollAmount = currentTop - mPaddingTop
+                        val scrollAmount = currentTop - actualTopPadding
                         mRecyclerView.smoothScrollBy(0, scrollAmount)
                     }
                 } else {
@@ -517,7 +540,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 if (lastVisible == mActualPageCount - 1 && lastView != null) {
                     // At last page - check if we need to show bottom padding
                     val currentBottom = lastView.bottom
-                    val targetBottom = viewportHeight - mPaddingBottom
+                    val targetBottom = viewportHeight - actualBottomPadding
                     if (currentBottom <= targetBottom) {
                         // Already showing full bottom padding, nothing to do
                     } else {
