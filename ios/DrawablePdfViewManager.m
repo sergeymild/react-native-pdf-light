@@ -30,7 +30,7 @@ RCT_EXPORT_VIEW_PROPERTY(onStrokeEnd, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onStrokeRemoved, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onStrokesCleared, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onZoomChange, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onZoomPanStart, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onZoomPanStart, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onZoomPanEnd, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onSingleTap, RCTDirectEventBlock)
 
