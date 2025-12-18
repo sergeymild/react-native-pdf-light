@@ -2,7 +2,7 @@ import UIKit
 
 // MARK: - ZoomablePdfScrollView (scrollable PDF viewer with global zoom using UICollectionView)
 
-class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
 
     // MARK: - React Props
 
@@ -54,6 +54,11 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     // Image cache
     private var imageCache = NSCache<NSNumber, UIImage>()
 
+    // Gesture recognizers
+    private var doubleTapGesture: UITapGestureRecognizer!
+    private var edgeTapGesture: UITapGestureRecognizer!
+    private var middleTapGesture: UITapGestureRecognizer!
+
     // MARK: - Initialization
 
     override init(frame: CGRect) {
@@ -96,21 +101,42 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         collectionView.register(PdfPageCell.self, forCellWithReuseIdentifier: PdfPageCell.reuseId)
         scrollView.addSubview(collectionView)
 
-        // Setup double tap gesture for zoom toggle
-        let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        // Double tap to zoom (only works in middle zone)
+        doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTapGesture.numberOfTapsRequired = 2
+        doubleTapGesture.delegate = self
         addGestureRecognizer(doubleTapGesture)
 
-        // Setup single tap gesture for tap-to-scroll
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
-        tapGesture.numberOfTapsRequired = 1
-        tapGesture.require(toFail: doubleTapGesture) // Wait for double tap to fail
-        addGestureRecognizer(tapGesture)
+        // Edge tap - no delay (doesn't wait for double tap to fail)
+        edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
+        edgeTapGesture.numberOfTapsRequired = 1
+        edgeTapGesture.delegate = self
+        addGestureRecognizer(edgeTapGesture)
+
+        // Middle tap - waits for double tap to fail
+        middleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMiddleTap(_:)))
+        middleTapGesture.numberOfTapsRequired = 1
+        middleTapGesture.require(toFail: doubleTapGesture)
+        middleTapGesture.delegate = self
+        addGestureRecognizer(middleTapGesture)
     }
 
     // MARK: - Tap Handling
 
-    @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        // Toggle zoom: if zoomed in, reset to 1.0; otherwise zoom to maxZoom
+        if scrollView.zoomScale > minZoom {
+            UIView.animate(withDuration: 0.3) {
+                self.scrollView.zoomScale = self.minZoom
+            }
+        } else {
+            // Zoom to point
+            let zoomRect = zoomRectForScale(maxZoom, center: gesture.location(in: collectionView))
+            scrollView.zoom(to: zoomRect, animated: true)
+        }
+    }
+
+    @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
         let tapLocation = gesture.location(in: self)
 
         // Calculate scroll amount (one viewport height)
@@ -122,53 +148,28 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let minOffset = -inset.top
         let maxOffset = scrollView.contentSize.height * scrollView.zoomScale - viewportHeight + inset.bottom
 
-      // Use edgeTapZone percentage for left/right scroll zones
-      let edgeRatio = edgeTapZone / 100.0
-      let leftEdge = bounds.width * edgeRatio
-      let rightEdge = bounds.width * (1.0 - edgeRatio)
-
-      if tapLocation.x < leftEdge {
-          // Left 15% - scroll up
-          let newOffset = max(minOffset, currentOffset - viewportHeight)
-          onTap?(["position": "left"])
-          UIView.animate(withDuration: 0.3) {
-              self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
-          }
-      } else if tapLocation.x > rightEdge {
-          // Right 15% - scroll down
-          let newOffset = min(maxOffset, currentOffset + viewportHeight)
-          onTap?(["position": "right"])
-          UIView.animate(withDuration: 0.3) {
-              self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
-          }
-      } else {
-          // Middle 70% - call onMiddleClick
-          onMiddleClick?([:])
-      }
-    }
-
-    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-        let tapLocation = gesture.location(in: self)
-
-        // Only handle double tap in middle zone
         let edgeRatio = edgeTapZone / 100.0
         let leftEdge = bounds.width * edgeRatio
-        let rightEdge = bounds.width * (1.0 - edgeRatio)
 
-        guard tapLocation.x >= leftEdge && tapLocation.x <= rightEdge else {
-            return
-        }
-
-        // Toggle zoom: if zoomed in, reset to 1.0; otherwise zoom to maxZoom
-        if scrollView.zoomScale > minZoom {
+        if tapLocation.x < leftEdge {
+            // Left zone - scroll up
+            let newOffset = max(minOffset, currentOffset - viewportHeight)
             UIView.animate(withDuration: 0.3) {
-                self.scrollView.zoomScale = self.minZoom
+                self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
             }
+            onTap?(["position": "left"])
         } else {
-            // Zoom to point
-            let zoomRect = zoomRectForScale(maxZoom, center: gesture.location(in: collectionView))
-            scrollView.zoom(to: zoomRect, animated: true)
+            // Right zone - scroll down
+            let newOffset = min(maxOffset, currentOffset + viewportHeight)
+            UIView.animate(withDuration: 0.3) {
+                self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
+            }
+            onTap?(["position": "right"])
         }
+    }
+
+    @objc private func handleMiddleTap(_ gesture: UITapGestureRecognizer) {
+        onMiddleClick?([:])
     }
 
     private func zoomRectForScale(_ scale: CGFloat, center: CGPoint) -> CGRect {
@@ -467,6 +468,30 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     func clearCache() {
         imageCache.removeAllObjects()
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        let tapLocation = gestureRecognizer.location(in: self)
+        let edgeRatio = edgeTapZone / 100.0
+        let leftEdge = bounds.width * edgeRatio
+        let rightEdge = bounds.width * (1.0 - edgeRatio)
+
+        let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
+        let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
+
+        // Edge tap only in edge zones
+        if gestureRecognizer === edgeTapGesture {
+            return isInEdgeZone
+        }
+
+        // Middle tap and double tap only in middle zone
+        if gestureRecognizer === middleTapGesture || gestureRecognizer === doubleTapGesture {
+            return isInMiddleZone
+        }
+
+        return true
     }
 }
 

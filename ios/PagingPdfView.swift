@@ -402,7 +402,7 @@ extension PagingPdfView: UIPageViewControllerDelegate {
 
 // MARK: - PdfPageViewController (single page with zoom)
 
-class PdfPageViewController: UIViewController, UIScrollViewDelegate {
+class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
 
     var pageIndex: Int = 0
     var minZoom: CGFloat = 1.0 {
@@ -427,6 +427,10 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate {
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
 
+    private var doubleTapGesture: UITapGestureRecognizer!
+    private var edgeTapGesture: UITapGestureRecognizer!
+    private var middleTapGesture: UITapGestureRecognizer!
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -448,16 +452,24 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate {
         imageView.backgroundColor = .white
         scrollView.addSubview(imageView)
 
-        // Double tap to zoom
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        scrollView.addGestureRecognizer(doubleTap)
+        // Double tap to zoom (only works in middle zone)
+        doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTapGesture.numberOfTapsRequired = 2
+        doubleTapGesture.delegate = self
+        scrollView.addGestureRecognizer(doubleTapGesture)
 
-        // Single tap
-        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
-        singleTap.numberOfTapsRequired = 1
-        singleTap.require(toFail: doubleTap)
-        scrollView.addGestureRecognizer(singleTap)
+        // Edge tap - no delay (doesn't wait for double tap to fail)
+        edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
+        edgeTapGesture.numberOfTapsRequired = 1
+        edgeTapGesture.delegate = self
+        scrollView.addGestureRecognizer(edgeTapGesture)
+
+        // Middle tap - waits for double tap to fail
+        middleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMiddleTap(_:)))
+        middleTapGesture.numberOfTapsRequired = 1
+        middleTapGesture.require(toFail: doubleTapGesture)
+        middleTapGesture.delegate = self
+        scrollView.addGestureRecognizer(middleTapGesture)
     }
 
     override func viewDidLayoutSubviews() {
@@ -507,17 +519,6 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate {
     }
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-        let tapLocation = gesture.location(in: view)
-
-        // Only handle double tap in middle zone
-        let edgeRatio = edgeTapZone / 100.0
-        let leftEdge = view.bounds.width * edgeRatio
-        let rightEdge = view.bounds.width * (1.0 - edgeRatio)
-
-        guard tapLocation.x >= leftEdge && tapLocation.x <= rightEdge else {
-            return
-        }
-
         if scrollView.zoomScale > minZoom {
             scrollView.setZoomScale(minZoom, animated: true)
         } else {
@@ -532,48 +533,44 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate {
         }
     }
 
-    @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
+    @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
         let tapLocation = gesture.location(in: view)
-
-        let edgeRatio = edgeTapZone / 100.0
-        let leftEdge = view.bounds.width * edgeRatio
-        let rightEdge = view.bounds.width * (1.0 - edgeRatio)
 
         let viewportHeight = view.bounds.height
         let contentHeight = scrollView.contentSize.height * scrollView.zoomScale
         let currentOffset = scrollView.contentOffset.y
         let maxOffset = contentHeight - viewportHeight
 
+        let edgeRatio = edgeTapZone / 100.0
+        let leftEdge = view.bounds.width * edgeRatio
+
         if tapLocation.x < leftEdge {
             // Left zone - scroll up or previous page
             if currentOffset <= 0 {
-                // At top - go to previous page
                 onPreviousPage?()
             } else {
-                // Scroll up
                 let newOffset = max(0, currentOffset - viewportHeight)
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
                 }
             }
             onTap?("left")
-        } else if tapLocation.x > rightEdge {
+        } else {
             // Right zone - scroll down or next page
             if currentOffset >= maxOffset - 1 {
-                // At bottom - go to next page
                 onNextPage?()
             } else {
-                // Scroll down
                 let newOffset = min(maxOffset, currentOffset + viewportHeight)
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
                 }
             }
             onTap?("right")
-        } else {
-            // Middle zone - call onMiddleClick
-            onMiddleClick?()
         }
+    }
+
+    @objc private func handleMiddleTap(_ gesture: UITapGestureRecognizer) {
+        onMiddleClick?()
     }
 
     func resetZoom() {
@@ -589,5 +586,29 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate {
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         updateContentInset()
         onZoomChange?(scrollView.zoomScale)
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        let tapLocation = gestureRecognizer.location(in: view)
+        let edgeRatio = edgeTapZone / 100.0
+        let leftEdge = view.bounds.width * edgeRatio
+        let rightEdge = view.bounds.width * (1.0 - edgeRatio)
+
+        let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
+        let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
+
+        // Edge tap only in edge zones
+        if gestureRecognizer === edgeTapGesture {
+            return isInEdgeZone
+        }
+
+        // Middle tap and double tap only in middle zone
+        if gestureRecognizer === middleTapGesture || gestureRecognizer === doubleTapGesture {
+            return isInMiddleZone
+        }
+
+        return true
     }
 }
