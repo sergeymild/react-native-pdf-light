@@ -139,33 +139,73 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
         let tapLocation = gesture.location(in: self)
 
-        // Calculate scroll amount (one viewport height)
         let viewportHeight = bounds.height
-        let currentOffset = scrollView.contentOffset.y
+        let scale = scrollView.zoomScale
 
         // Account for content insets (including pdfPaddingTop/Bottom)
         let inset = scrollView.contentInset
         let minOffset = -inset.top
-        let maxOffset = scrollView.contentSize.height * scrollView.zoomScale - viewportHeight + inset.bottom
+        let maxOffset = scrollView.contentSize.height * scale - viewportHeight + inset.bottom
 
         let edgeRatio = edgeTapZone / 100.0
         let leftEdge = bounds.width * edgeRatio
 
-        if tapLocation.x < leftEdge {
-            // Left zone - scroll up
-            let newOffset = max(minOffset, currentOffset - viewportHeight)
-            UIView.animate(withDuration: 0.3) {
-                self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
+        // Calculate page height
+        guard pdfPageWidth > 0, pdfPageHeight > 0 else { return }
+        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth) * scale
+
+        // Check device orientation: portrait (height > width) or landscape (width >= height)
+        let isPortraitMode = bounds.height > bounds.width
+
+        let currentOffset = scrollView.contentOffset.y
+
+        if isPortraitMode {
+            // Portrait mode: scroll page by page, centering each page
+            let centerY = (currentOffset + inset.top) + viewportHeight / 2
+            let currentCenteredPage = Int(centerY / pageHeight)
+
+            if tapLocation.x < leftEdge {
+                // Left zone - go to previous page
+                let targetPage = max(0, currentCenteredPage - 1)
+                let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top)
+                let clampedOffset = max(minOffset, min(maxOffset, targetOffset))
+                UIView.animate(withDuration: 0.3) {
+                    self.scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
+                }
+            } else {
+                // Right zone - go to next page
+                let targetPage = min(actualPageCount - 1, currentCenteredPage + 1)
+                let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top)
+                let clampedOffset = max(minOffset, min(maxOffset, targetOffset))
+                UIView.animate(withDuration: 0.3) {
+                    self.scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
+                }
             }
-            onTap?(["position": "left"])
         } else {
-            // Right zone - scroll down
-            let newOffset = min(maxOffset, currentOffset + viewportHeight)
-            UIView.animate(withDuration: 0.3) {
-                self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
+            // Landscape mode: scroll by viewport height
+            if tapLocation.x < leftEdge {
+                // Left zone - scroll up by viewport
+                let newOffset = max(minOffset, currentOffset - viewportHeight)
+                UIView.animate(withDuration: 0.3) {
+                    self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
+                }
+            } else {
+                // Right zone - scroll down by viewport
+                let newOffset = min(maxOffset, currentOffset + viewportHeight)
+                UIView.animate(withDuration: 0.3) {
+                    self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
+                }
             }
-            onTap?(["position": "right"])
         }
+
+        onTap?(["position": tapLocation.x < leftEdge ? "left" : "right"])
+    }
+
+    private func offsetToCenterPage(_ page: Int, pageHeight: CGFloat, viewportHeight: CGFloat, insetTop: CGFloat) -> CGFloat {
+        // Center of page N is at: page * pageHeight + pageHeight / 2
+        // To center it in viewport: centerOfPage - viewportHeight / 2 - insetTop
+        let pageCenterY = CGFloat(page) * pageHeight + pageHeight / 2
+        return pageCenterY - viewportHeight / 2 - insetTop
     }
 
     @objc private func handleMiddleTap(_ gesture: UITapGestureRecognizer) {
