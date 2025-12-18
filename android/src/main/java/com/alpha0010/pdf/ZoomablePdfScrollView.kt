@@ -510,55 +510,88 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         val actualTopPadding = mRecyclerView.paddingTop
         val actualBottomPadding = mRecyclerView.paddingBottom
 
+        // Check device orientation: portrait (height > width) or landscape (width >= height)
+        val isPortraitMode = height > width
+
         when {
             tapX < leftEdge -> {
-                // Left - scroll up by one viewport
-                val firstVisible = layoutManager.findFirstVisibleItemPosition()
-                val firstView = layoutManager.findViewByPosition(firstVisible)
-
-                if (firstVisible == 0 && firstView != null) {
-                    // At first page - check if we need to show top padding
-                    val currentTop = firstView.top
-                    if (currentTop >= actualTopPadding) {
-                        // Already showing full top padding, nothing to do
-                    } else {
-                        // Scroll to show top padding
-                        val scrollAmount = currentTop - actualTopPadding
-                        mRecyclerView.smoothScrollBy(0, scrollAmount)
-                    }
+                if (isPortraitMode) {
+                    // Portrait mode: scroll to center previous page
+                    scrollToCenteredPage(getCurrentCenteredPage() - 1)
                 } else {
-                    // Normal scroll up
-                    mRecyclerView.smoothScrollBy(0, -viewportHeight)
+                    // Landscape mode: scroll up by one viewport
+                    val firstVisible = layoutManager.findFirstVisibleItemPosition()
+                    val firstView = layoutManager.findViewByPosition(firstVisible)
+
+                    if (firstVisible == 0 && firstView != null) {
+                        val currentTop = firstView.top
+                        if (currentTop >= actualTopPadding) {
+                            // Already showing full top padding, nothing to do
+                        } else {
+                            val scrollAmount = currentTop - actualTopPadding
+                            mRecyclerView.smoothScrollBy(0, scrollAmount)
+                        }
+                    } else {
+                        mRecyclerView.smoothScrollBy(0, -viewportHeight)
+                    }
                 }
                 onTap("left")
             }
             tapX > rightEdge -> {
-                // Right - scroll down by one viewport
-                val lastVisible = layoutManager.findLastVisibleItemPosition()
-                val lastView = layoutManager.findViewByPosition(lastVisible)
-
-                if (lastVisible == mActualPageCount - 1 && lastView != null) {
-                    // At last page - check if we need to show bottom padding
-                    val currentBottom = lastView.bottom
-                    val targetBottom = viewportHeight - actualBottomPadding
-                    if (currentBottom <= targetBottom) {
-                        // Already showing full bottom padding, nothing to do
-                    } else {
-                        // Scroll to show bottom padding
-                        val scrollAmount = currentBottom - targetBottom
-                        mRecyclerView.smoothScrollBy(0, scrollAmount)
-                    }
+                if (isPortraitMode) {
+                    // Portrait mode: scroll to center next page
+                    scrollToCenteredPage(getCurrentCenteredPage() + 1)
                 } else {
-                    // Normal scroll down
-                    mRecyclerView.smoothScrollBy(0, viewportHeight)
+                    // Landscape mode: scroll down by one viewport
+                    val lastVisible = layoutManager.findLastVisibleItemPosition()
+                    val lastView = layoutManager.findViewByPosition(lastVisible)
+
+                    if (lastVisible == mActualPageCount - 1 && lastView != null) {
+                        val currentBottom = lastView.bottom
+                        val targetBottom = viewportHeight - actualBottomPadding
+                        if (currentBottom <= targetBottom) {
+                            // Already showing full bottom padding, nothing to do
+                        } else {
+                            val scrollAmount = currentBottom - targetBottom
+                            mRecyclerView.smoothScrollBy(0, scrollAmount)
+                        }
+                    } else {
+                        mRecyclerView.smoothScrollBy(0, viewportHeight)
+                    }
                 }
                 onTap("right")
             }
             else -> {
-                // Middle 70% - call onMiddleClick
+                // Middle zone - call onMiddleClick
                 onMiddleClick()
             }
         }
+    }
+
+    private fun getCurrentCenteredPage(): Int {
+        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return 0
+        val pageHeight = getPageHeight()
+        if (pageHeight <= 0) return 0
+
+        // Calculate which page is centered in the viewport
+        val viewportCenterY = mRecyclerView.computeVerticalScrollOffset() + height / 2
+        return (viewportCenterY / pageHeight).coerceIn(0, mActualPageCount - 1)
+    }
+
+    private fun scrollToCenteredPage(targetPage: Int) {
+        val page = targetPage.coerceIn(0, mActualPageCount - 1)
+        val pageHeight = getPageHeight()
+        if (pageHeight <= 0) return
+
+        // Calculate offset to center the target page in viewport
+        val pageCenterY = page * pageHeight + pageHeight / 2
+        val targetOffset = pageCenterY - height / 2
+
+        // Clamp to valid scroll range
+        val maxScroll = mActualPageCount * pageHeight - height + mRecyclerView.paddingTop + mRecyclerView.paddingBottom
+        val clampedOffset = targetOffset.coerceIn(-mRecyclerView.paddingTop, maxScroll.coerceAtLeast(0))
+
+        mRecyclerView.smoothScrollBy(0, clampedOffset - mRecyclerView.computeVerticalScrollOffset())
     }
 
     override fun onDetachedFromWindow() {
