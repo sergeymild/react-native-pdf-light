@@ -40,4 +40,10 @@ export {
 //   PagingPdfTapEvent,
 // } from './NativePagingPdfView';
 
-export { PdfViewer } from './PdfViewer';
+export {
+  PdfViewer,
+  type PdfViewerProps,
+  type PdfViewerRef,
+  type PdfErrorEvent,
+  type PdfLoadCompleteEvent,
+} from './PdfViewer';

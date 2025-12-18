@@ -481,9 +481,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
         let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
 
-        // Edge tap only in edge zones
+        // Edge tap only in edge zones AND when not zoomed
         if gestureRecognizer === edgeTapGesture {
-            return isInEdgeZone
+            return isInEdgeZone && scrollView.zoomScale <= minZoom + 0.01
         }
 
         // Middle tap and double tap only in middle zone

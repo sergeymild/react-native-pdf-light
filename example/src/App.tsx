@@ -40,25 +40,21 @@ export default function App() {
   return (
     <View style={styles.container}>
       <PdfViewer
-        viewerType={'zoomable'}
+        viewerType="zoomable"
         ref={pdfViewRef}
-        props={{
-          source: source,
-          minZoom: 1,
-          maxZoom: 2,
-          backgroundColor: '#ffffff',
-          edgeTapZone: 30,
-          pdfPaddingBottom: 200,
-          pdfPaddingTop: 200,
-          onLoadComplete: handleLoadComplete,
-          onPageChange: handlePageChange,
-          onZoomChange: handleZoomChange,
-          onError: (e) => console.warn('PDF Error:', e.message),
-          onMiddleClick: () => {
-            console.log('[App.onMiddleClick]');
-          },
-          style: styles.pdfView,
+        source={source}
+        minZoom={1}
+        maxZoom={2}
+        backgroundColor="#ffffff"
+        edgeTapZone={30}
+        onLoadComplete={handleLoadComplete}
+        onPageChange={handlePageChange}
+        onZoomChange={handleZoomChange}
+        onError={(e) => console.warn('PDF Error:', e.message)}
+        onMiddleClick={() => {
+          console.log('[App.onMiddleClick]');
         }}
+        style={styles.pdfView}
       />
 
       <PageIndicator
