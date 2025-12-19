@@ -608,11 +608,12 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     // Zoom in with animation to tap point - use maxZoom for full zoom
                     val targetScale = maxZoom
 
-                    // Calculate content point under tap
+                    // Calculate content point under tap in content coordinates
+                    // tapY is screen coordinate, need to convert to content coordinate
                     val contentX = (tapX - offsetX) / scale
-                    val contentY = (tapY + scrollView.scrollY) / scale
+                    val contentY = tapY / scale + scrollView.scrollY
 
-                    // Calculate new offset to keep tap point stationary
+                    // Calculate new horizontal offset to keep tap point stationary
                     var targetOffsetX = tapX - contentX * targetScale
 
                     // Constrain targetOffsetX to valid bounds
@@ -621,7 +622,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), maxOffsetX)
 
-                    val targetScrollY = (contentY * targetScale - tapY).toInt().coerceAtLeast(0)
+                    // Calculate target scroll to keep tap point at same screen position
+                    // After zoom: screenY = (contentY - scrollY) * scale, we want screenY = tapY
+                    // So: tapY = (contentY - targetScrollY) * targetScale
+                    // targetScrollY = contentY - tapY / targetScale
+                    val targetScrollY = (contentY - tapY / targetScale).toInt().coerceAtLeast(0)
 
                     animateZoomTo(targetScale, targetOffsetX, targetScrollY)
                 }

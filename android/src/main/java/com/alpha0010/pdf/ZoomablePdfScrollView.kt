@@ -143,6 +143,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 // Only handle double tap in middle zone
                 val tapX = e.x
+                val tapY = e.y
                 val edgeRatio = mEdgeTapZone / 100f
                 val leftEdge = width * edgeRatio
                 val rightEdge = width * (1f - edgeRatio)
@@ -153,19 +154,34 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
                 if (mScale > mMinScale) {
                     // Reset zoom with animation
-                    animateZoomTo(mMinScale, 0f)
+                    animateZoomTo(mMinScale, 0f, 0)
                 } else {
-                    // Zoom to 2x at tap location with animation
-                    val newScale = 2f.coerceAtMost(mMaxScale)
-                    val focusRatioX = tapX / width
-                    var targetOffsetX = tapX - focusRatioX * width * newScale
+                    // Zoom to maxZoom at tap location with animation
+                    val targetScale = mMaxScale
+
+                    // Calculate content point under tap (horizontal)
+                    val contentX = (tapX - mOffsetX) / mScale
+
+                    // Calculate new horizontal offset to keep tap point stationary
+                    var targetOffsetX = tapX - contentX * targetScale
 
                     // Constrain target offset
-                    val scaledWidth = width * newScale
+                    val scaledWidth = width * targetScale
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
 
-                    animateZoomTo(newScale, targetOffsetX)
+                    // Calculate vertical scroll adjustment
+                    // tapY is screen coordinate, need to convert to content coordinate
+                    val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
+                    val contentY = tapY / mScale + currentScrollY
+
+                    // Calculate target scroll to keep tap point at same screen position
+                    // After zoom: screenY = (contentY - scrollY) * scale, we want screenY = tapY
+                    // targetScrollY = contentY - tapY / targetScale
+                    val targetScrollY = (contentY - tapY / targetScale).toInt().coerceAtLeast(0)
+                    val scrollDelta = targetScrollY - currentScrollY
+
+                    animateZoomTo(targetScale, targetOffsetX, scrollDelta)
                 }
 
                 return true
@@ -401,11 +417,12 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     // --- Zoom animation ---
 
-    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, duration: Long = 300L) {
+    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, scrollDelta: Int = 0, duration: Long = 300L) {
         zoomAnimator?.cancel()
 
         val startScale = mScale
         val startOffsetX = mOffsetX
+        var accumulatedScroll = 0
 
         zoomAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
@@ -414,6 +431,17 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 val fraction = animator.animatedValue as Float
                 mScale = startScale + (targetScale - startScale) * fraction
                 mOffsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
+
+                // Animate scroll
+                if (scrollDelta != 0) {
+                    val targetScrollSoFar = (scrollDelta * fraction).toInt()
+                    val scrollThisFrame = targetScrollSoFar - accumulatedScroll
+                    if (scrollThisFrame != 0) {
+                        mRecyclerView.scrollBy(0, scrollThisFrame)
+                        accumulatedScroll = targetScrollSoFar
+                    }
+                }
+
                 applyTransform()
                 onZoomChange()
             }
