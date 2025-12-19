@@ -123,7 +123,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
                             val recyclerView = mViewPager.getChildAt(0) as? RecyclerView
                             val viewHolder = recyclerView?.findViewHolderForAdapterPosition(targetPage) as? PdfPageViewHolder
                             Log.d("PagingPdfView", "Found viewHolder: ${viewHolder != null}")
-                            viewHolder?.pageView?.scrollToBottom()
+                            viewHolder?.pageView?.scrollToBottomWithFade()
                         }, 100)
                     }
                 }
@@ -746,6 +746,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         val shouldScroll = shouldScrollToBottomOnLoad && bitmap != null
         Log.d("ZoomablePageView", "setImage: bitmap=${bitmap != null}, shouldScrollToBottomOnLoad=$shouldScrollToBottomOnLoad, shouldScroll=$shouldScroll")
 
+        // Hide content while scrolling to bottom to avoid visible "jump"
+        if (shouldScroll) {
+            scrollView.alpha = 0f
+        }
+
         imageView.setImageBitmap(bitmap)
         // Reset zoom when setting new image
         scale = minZoom
@@ -758,9 +763,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         if (shouldScroll) {
             shouldScrollToBottomOnLoad = false
             Log.d("ZoomablePageView", "setImage: calling scrollToBottom")
-            // Use postDelayed to ensure layout is complete
+            // Use postDelayed to ensure layout is complete, then scroll and show
             scrollView.postDelayed({
                 scrollToBottom()
+                // Fade in after scroll is complete
+                scrollView.animate().alpha(1f).setDuration(100).start()
             }, 50)
         }
     }
@@ -776,6 +783,15 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         if (maxScroll > 0) {
             scrollView.scrollTo(0, maxScroll)
             Log.d("ZoomablePageView", "scrollToBottom: scrolled to $maxScroll, actual scrollY=${scrollView.scrollY}")
+        }
+    }
+
+    fun scrollToBottomWithFade() {
+        // Hide, scroll, then fade in to avoid visible jump
+        scrollView.alpha = 0f
+        scrollView.post {
+            scrollToBottom()
+            scrollView.animate().alpha(1f).setDuration(100).start()
         }
     }
 
