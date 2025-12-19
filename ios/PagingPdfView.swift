@@ -210,10 +210,10 @@ class PagingPdfView: UIView {
         }
     }
 
-    private func showPage(_ pageIndex: Int, animated: Bool) {
+    private func showPage(_ pageIndex: Int, animated: Bool, scrollToBottom: Bool = false) {
         guard pageIndex >= 0, pageIndex < actualPageCount else { return }
 
-        let pageVC = createPageViewController(for: pageIndex)
+        let pageVC = createPageViewController(for: pageIndex, scrollToBottom: scrollToBottom)
         let direction: UIPageViewController.NavigationDirection = pageIndex >= currentPage ? .forward : .reverse
 
         pageViewController.setViewControllers(
@@ -226,13 +226,14 @@ class PagingPdfView: UIView {
         currentPage = pageIndex
     }
 
-    private func createPageViewController(for pageIndex: Int) -> PdfPageViewController {
+    private func createPageViewController(for pageIndex: Int, scrollToBottom: Bool = false) -> PdfPageViewController {
         let pageVC = PdfPageViewController()
         pageVC.pageIndex = pageIndex
         pageVC.minZoom = minZoom
         pageVC.maxZoom = maxZoom
         pageVC.edgeTapZone = edgeTapZone
         pageVC.pageBackgroundColor = pdfBackgroundColor
+        pageVC.shouldScrollToBottomOnLoad = scrollToBottom
         pageVC.onZoomChange = { [weak self] scale in
             self?.onZoomChange?(["scale": scale])
         }
@@ -242,9 +243,10 @@ class PagingPdfView: UIView {
         pageVC.onMiddleClick = { [weak self] in
             self?.onMiddleClick?([:])
         }
-        pageVC.onPreviousPage = { [weak self] in
+        pageVC.onPreviousPage = { [weak self] scrollToBottom in
             guard let self = self, pageIndex > 0 else { return }
-            self.scrollToPage(pageIndex - 1, animated: true)
+            self.showPage(pageIndex - 1, animated: true, scrollToBottom: scrollToBottom)
+            self.onPageChange?(["page": pageIndex - 1])
         }
         pageVC.onNextPage = { [weak self] in
             guard let self = self, pageIndex < self.actualPageCount - 1 else { return }
@@ -417,8 +419,10 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     var onZoomChange: ((CGFloat) -> Void)?
     var onTap: ((String) -> Void)?
     var onMiddleClick: (() -> Void)?
-    var onPreviousPage: (() -> Void)?
+    var onPreviousPage: ((_ scrollToBottom: Bool) -> Void)?
     var onNextPage: (() -> Void)?
+
+    var shouldScrollToBottomOnLoad = false
 
     var isAtMinZoom: Bool {
         return scrollView.zoomScale <= minZoom + 0.01
@@ -481,6 +485,19 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     func setImage(_ image: UIImage?) {
         imageView.image = image
         updateImageViewFrame()
+
+        // Scroll to bottom if requested (for landscape back navigation)
+        if shouldScrollToBottomOnLoad {
+            shouldScrollToBottomOnLoad = false
+            scrollToBottom()
+        }
+    }
+
+    func scrollToBottom() {
+        let contentHeight = scrollView.contentSize.height
+        let viewportHeight = scrollView.bounds.height
+        let maxOffset = max(0, contentHeight - viewportHeight)
+        scrollView.contentOffset = CGPoint(x: 0, y: maxOffset)
     }
 
     private func updateImageViewFrame() {
@@ -544,10 +561,14 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         let edgeRatio = edgeTapZone / 100.0
         let leftEdge = view.bounds.width * edgeRatio
 
+        // Check if landscape mode
+        let isLandscape = view.bounds.width > view.bounds.height
+
         if tapLocation.x < leftEdge {
             // Left zone - scroll up or previous page
             if currentOffset <= 0 {
-                onPreviousPage?()
+                // In landscape mode, go to previous page scrolled to bottom
+                onPreviousPage?(isLandscape)
             } else {
                 let newOffset = max(0, currentOffset - viewportHeight)
                 UIView.animate(withDuration: 0.3) {
