@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -64,6 +65,10 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     private var mNeedsInitialRender = false
     private var mPendingSource: String? = null
 
+    // Scroll to bottom on next page load (for landscape back navigation)
+    private var mPendingScrollToBottom = false
+    private var mPendingScrollToBottomPage = -1
+
     // Coroutine scope for rendering
     private val renderScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -100,6 +105,27 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
                 if (position != mCurrentPage && position >= 0 && position < mActualPageCount) {
                     mCurrentPage = position
                     onPageChange()
+                }
+            }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                Log.d("PagingPdfView", "onPageScrollStateChanged: state=$state, pending=$mPendingScrollToBottom, pendingPage=$mPendingScrollToBottomPage, currentPage=$mCurrentPage")
+                // Wait for scroll to complete before scrolling to bottom
+                if (state == ViewPager2.SCROLL_STATE_IDLE && mPendingScrollToBottom) {
+                    val targetPage = mPendingScrollToBottomPage
+                    Log.d("PagingPdfView", "SCROLL_STATE_IDLE with pending, targetPage=$targetPage, currentPage=$mCurrentPage")
+                    if (targetPage == mCurrentPage) {
+                        mPendingScrollToBottom = false
+                        mPendingScrollToBottomPage = -1
+                        Log.d("PagingPdfView", "Scheduling scrollToBottom for page $targetPage")
+                        // Find the ViewHolder and scroll to bottom after a short delay
+                        mViewPager.postDelayed({
+                            val recyclerView = mViewPager.getChildAt(0) as? RecyclerView
+                            val viewHolder = recyclerView?.findViewHolderForAdapterPosition(targetPage) as? PdfPageViewHolder
+                            Log.d("PagingPdfView", "Found viewHolder: ${viewHolder != null}")
+                            viewHolder?.pageView?.scrollToBottom()
+                        }, 100)
+                    }
                 }
             }
         })
@@ -361,8 +387,14 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
             holder.pageView.minZoom = mMinScale
             holder.pageView.maxZoom = mMaxScale
             holder.pageView.edgeTapZone = mEdgeTapZone
-            holder.pageView.onPreviousPage = {
+            holder.pageView.onPreviousPage = { scrollToBottom ->
+                Log.d("PagingPdfView", "onPreviousPage called, scrollToBottom=$scrollToBottom, position=$position")
                 if (position > 0) {
+                    if (scrollToBottom) {
+                        mPendingScrollToBottom = true
+                        mPendingScrollToBottomPage = position - 1
+                        Log.d("PagingPdfView", "Set pending scroll to bottom for page ${position - 1}")
+                    }
                     scrollToPage(position - 1, true)
                 }
             }
@@ -372,8 +404,17 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
                 }
             }
 
+            // Check if we should scroll to bottom on this page
+            if (mPendingScrollToBottom && mPendingScrollToBottomPage == position) {
+                Log.d("PagingPdfView", "onBindViewHolder: setting shouldScrollToBottomOnLoad=true for position=$position")
+                holder.pageView.shouldScrollToBottomOnLoad = true
+                mPendingScrollToBottom = false
+                mPendingScrollToBottomPage = -1
+            }
+
             // Check cache
             val cached = mImageCache.get(position)
+            Log.d("PagingPdfView", "onBindViewHolder: position=$position, cached=${cached != null}, shouldScrollToBottom=${holder.pageView.shouldScrollToBottomOnLoad}")
             if (cached != null) {
                 holder.pageView.setImage(cached, viewWidth)
                 // Force refresh after setting cached image
@@ -450,9 +491,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     var onZoomChange: ((Float) -> Unit)? = null
     var onTap: ((String) -> Unit)? = null
     var onMiddleClick: (() -> Unit)? = null
-    var onPreviousPage: (() -> Unit)? = null
+    var onPreviousPage: ((scrollToBottom: Boolean) -> Unit)? = null
     var onNextPage: (() -> Unit)? = null
     var onZoomStateChange: ((Boolean) -> Unit)? = null
+
+    var shouldScrollToBottomOnLoad = false
 
     private val scrollView: androidx.core.widget.NestedScrollView
     private val imageView: ImageView
@@ -560,11 +603,15 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 val currentOffset = scrollView.scrollY
                 val maxOffset = (contentHeight - viewportHeight).coerceAtLeast(0)
 
+                // Check if landscape mode
+                val isLandscape = width > height
+
                 when {
                     tapX < leftEdge -> {
                         // Left zone - scroll up or previous page
                         if (currentOffset <= 0 && offsetX >= 0) {
-                            onPreviousPage?.invoke()
+                            // In landscape mode, go to previous page scrolled to bottom
+                            onPreviousPage?.invoke(isLandscape)
                         } else {
                             val newOffset = (currentOffset - viewportHeight).coerceAtLeast(0)
                             scrollView.smoothScrollTo(0, newOffset)
@@ -696,6 +743,9 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     fun setImage(bitmap: Bitmap?, parentWidth: Int = 0) {
+        val shouldScroll = shouldScrollToBottomOnLoad && bitmap != null
+        Log.d("ZoomablePageView", "setImage: bitmap=${bitmap != null}, shouldScrollToBottomOnLoad=$shouldScrollToBottomOnLoad, shouldScroll=$shouldScroll")
+
         imageView.setImageBitmap(bitmap)
         // Reset zoom when setting new image
         scale = minZoom
@@ -703,6 +753,30 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         applyTransform()
         updateScrollViewPadding()
         requestLayout()
+
+        // Scroll to bottom if requested (for landscape back navigation)
+        if (shouldScroll) {
+            shouldScrollToBottomOnLoad = false
+            Log.d("ZoomablePageView", "setImage: calling scrollToBottom")
+            // Use postDelayed to ensure layout is complete
+            scrollView.postDelayed({
+                scrollToBottom()
+            }, 50)
+        }
+    }
+
+    fun scrollToBottom() {
+        Log.d("ZoomablePageView", "scrollToBottom called, imageView.height=${imageView.height}, scrollView.height=${scrollView.height}")
+        // Calculate the exact scroll position to bottom
+        val contentHeight = imageView.height
+        val viewportHeight = scrollView.height
+        val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0)
+        Log.d("ZoomablePageView", "scrollToBottom: contentHeight=$contentHeight, viewportHeight=$viewportHeight, maxScroll=$maxScroll")
+
+        if (maxScroll > 0) {
+            scrollView.scrollTo(0, maxScroll)
+            Log.d("ZoomablePageView", "scrollToBottom: scrolled to $maxScroll, actual scrollY=${scrollView.scrollY}")
+        }
     }
 
     private fun applyTransform() {
