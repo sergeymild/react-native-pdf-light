@@ -175,7 +175,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             } else {
                 // Right zone - go to next page
                 let targetPage = min(actualPageCount - 1, currentCenteredPage + 1)
-                let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top)
+                let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top - pdfPaddingTop)
                 let clampedOffset = max(minOffset, min(maxOffset, targetOffset))
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
