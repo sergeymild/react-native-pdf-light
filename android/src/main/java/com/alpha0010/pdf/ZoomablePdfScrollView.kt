@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -71,6 +72,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     // Track width for rotation handling
     private var mPreviousWidth = 0
 
+
     // Coroutine scope for rendering
     private val renderScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -133,14 +135,52 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             }
         })
 
-        // Setup gesture detector for double-tap and single tap
+        // Setup gesture detector for taps
         mGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                Log.d("PDF_TAP", "onDown: x=${e.x}, width=$width")
+                return true // Must return true to receive other events
+            }
+
+            // onSingleTapUp fires immediately - used for edge taps
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                val tapX = e.x
+                val edgeRatio = mEdgeTapZone / 100f
+                val leftEdge = width * edgeRatio
+                val rightEdge = width * (1f - edgeRatio)
+
+                Log.d("PDF_TAP", "onSingleTapUp: tapX=$tapX, leftEdge=$leftEdge, rightEdge=$rightEdge")
+
+                // Only handle edge taps here (instant response)
+                if (tapX < leftEdge || tapX > rightEdge) {
+                    Log.d("PDF_TAP", "onSingleTapUp: EDGE TAP detected!")
+                    handleEdgeTap(tapX)
+                    return true
+                }
+                Log.d("PDF_TAP", "onSingleTapUp: middle zone, skipping")
+                return false
+            }
+
+            // onSingleTapConfirmed fires after double-tap timeout - used for middle zone
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                handleSingleTap(e)
-                return true
+                val tapX = e.x
+                val edgeRatio = mEdgeTapZone / 100f
+                val leftEdge = width * edgeRatio
+                val rightEdge = width * (1f - edgeRatio)
+
+                Log.d("PDF_TAP", "onSingleTapConfirmed: tapX=$tapX")
+
+                // Only handle middle zone here
+                if (tapX >= leftEdge && tapX <= rightEdge) {
+                    Log.d("PDF_TAP", "onSingleTapConfirmed: MIDDLE TAP!")
+                    onMiddleClick()
+                    return true
+                }
+                return false
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
+                Log.d("PDF_TAP", "onDoubleTap: x=${e.x}")
                 // Only handle double tap in middle zone
                 val tapX = e.x
                 val tapY = e.y
@@ -243,7 +283,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         // Always process scale gestures
         mScaleDetector.onTouchEvent(event)
 
-        // Process taps and double-taps (this handles single tap for landscape scroll)
+        // Process taps (edge taps via onSingleTapUp, middle via onSingleTapConfirmed/onDoubleTap)
         mGestureDetector.onTouchEvent(event)
 
         // Handle pan when zoomed
@@ -525,14 +565,17 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     // MARK: - Single tap handling
 
-    private fun handleSingleTap(e: MotionEvent) {
-        val tapX = e.x
+    private fun handleEdgeTap(tapX: Float) {
         val edgeRatio = mEdgeTapZone / 100f
         val leftEdge = width * edgeRatio
         val rightEdge = width * (1f - edgeRatio)
 
         val viewportHeight = height
-        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
+        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager
+        if (layoutManager == null) {
+            Log.d("PDF_TAP", "handleEdgeTap: layoutManager is NULL!")
+            return
+        }
 
         // Get actual padding (includes zoom extra padding)
         val actualTopPadding = mRecyclerView.paddingTop
@@ -540,59 +583,66 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
         // Check device orientation: portrait (height > width) or landscape (width >= height)
         val isPortraitMode = height > width
+        Log.d("PDF_TAP", "handleEdgeTap: tapX=$tapX, isPortrait=$isPortraitMode, height=$height, width=$width")
 
         when {
             tapX < leftEdge -> {
+                Log.d("PDF_TAP", "handleEdgeTap: LEFT tap")
                 if (isPortraitMode) {
-                    // Portrait mode: scroll to center previous page
-                    scrollToCenteredPage(getCurrentCenteredPage() - 1)
+                    val currentPage = getCurrentCenteredPage()
+                    Log.d("PDF_TAP", "handleEdgeTap: scrollToCenteredPage(${currentPage - 1})")
+                    scrollToCenteredPage(currentPage - 1)
                 } else {
-                    // Landscape mode: scroll up by one viewport
                     val firstVisible = layoutManager.findFirstVisibleItemPosition()
                     val firstView = layoutManager.findViewByPosition(firstVisible)
 
                     if (firstVisible == 0 && firstView != null) {
                         val currentTop = firstView.top
-                        if (currentTop >= actualTopPadding) {
-                            // Already showing full top padding, nothing to do
-                        } else {
+                        if (currentTop < actualTopPadding) {
                             val scrollAmount = currentTop - actualTopPadding
-                            mRecyclerView.smoothScrollBy(0, scrollAmount)
+                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
                         }
                     } else {
-                        mRecyclerView.smoothScrollBy(0, -viewportHeight)
+                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, -viewportHeight) }
                     }
                 }
                 onTap("left")
             }
             tapX > rightEdge -> {
+                Log.d("PDF_TAP", "handleEdgeTap: RIGHT tap")
                 if (isPortraitMode) {
-                    // Portrait mode: scroll to center next page
-                    scrollToCenteredPage(getCurrentCenteredPage() + 1)
+                    val currentPage = getCurrentCenteredPage()
+                    Log.d("PDF_TAP", "handleEdgeTap: scrollToCenteredPage(${currentPage + 1})")
+                    scrollToCenteredPage(currentPage + 1)
                 } else {
-                    // Landscape mode: scroll down by one viewport
                     val lastVisible = layoutManager.findLastVisibleItemPosition()
                     val lastView = layoutManager.findViewByPosition(lastVisible)
 
                     if (lastVisible == mActualPageCount - 1 && lastView != null) {
                         val currentBottom = lastView.bottom
                         val targetBottom = viewportHeight - actualBottomPadding
-                        if (currentBottom <= targetBottom) {
-                            // Already showing full bottom padding, nothing to do
-                        } else {
+                        if (currentBottom > targetBottom) {
                             val scrollAmount = currentBottom - targetBottom
-                            mRecyclerView.smoothScrollBy(0, scrollAmount)
+                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
                         }
                     } else {
-                        mRecyclerView.smoothScrollBy(0, viewportHeight)
+                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, viewportHeight) }
                     }
                 }
                 onTap("right")
             }
-            else -> {
-                // Middle zone - call onMiddleClick
-                onMiddleClick()
-            }
+        }
+    }
+
+    private fun handleSingleTap(e: MotionEvent) {
+        val tapX = e.x
+        val edgeRatio = mEdgeTapZone / 100f
+        val leftEdge = width * edgeRatio
+        val rightEdge = width * (1f - edgeRatio)
+
+        // Edge taps are handled by handleEdgeTap, this is only for middle zone
+        if (tapX >= leftEdge && tapX <= rightEdge) {
+            onMiddleClick()
         }
     }
 
@@ -609,17 +659,28 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     private fun scrollToCenteredPage(targetPage: Int) {
         val page = targetPage.coerceIn(0, mActualPageCount - 1)
         val pageHeight = getPageHeight()
-        if (pageHeight <= 0) return
+        Log.d("PDF_TAP", "scrollToCenteredPage: targetPage=$targetPage, page=$page, pageHeight=$pageHeight, pageCount=$mActualPageCount")
+        if (pageHeight <= 0) {
+            Log.d("PDF_TAP", "scrollToCenteredPage: pageHeight <= 0, returning!")
+            return
+        }
 
         // Calculate offset to center the target page in viewport
         val pageCenterY = page * pageHeight + pageHeight / 2
         val targetOffset = pageCenterY - height / 2
+        val currentScroll = mRecyclerView.computeVerticalScrollOffset()
 
         // Clamp to valid scroll range
         val maxScroll = mActualPageCount * pageHeight - height + mRecyclerView.paddingTop + mRecyclerView.paddingBottom
         val clampedOffset = targetOffset.coerceIn(-mRecyclerView.paddingTop, maxScroll.coerceAtLeast(0))
+        val scrollBy = clampedOffset - currentScroll
 
-        mRecyclerView.smoothScrollBy(0, clampedOffset - mRecyclerView.computeVerticalScrollOffset())
+        Log.d("PDF_TAP", "scrollToCenteredPage: currentScroll=$currentScroll, targetOffset=$targetOffset, clampedOffset=$clampedOffset, scrollBy=$scrollBy")
+
+        // Post to run after touch event processing completes
+        mRecyclerView.post {
+            mRecyclerView.smoothScrollBy(0, scrollBy)
+        }
     }
 
     override fun onDetachedFromWindow() {
