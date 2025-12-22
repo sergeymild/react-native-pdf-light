@@ -103,13 +103,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
         // Setup scale gesture detector
         mScaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            private var focusX = 0f
-            private var focusY = 0f
-
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
                 zoomAnimator?.cancel() // Cancel any running animation
-                focusX = detector.focusX
-                focusY = detector.focusY
                 return true
             }
 
@@ -118,17 +113,34 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 val newScale = (mScale * scaleFactor).coerceIn(mMinScale, mMaxScale)
 
                 if (newScale != mScale) {
-                    // Calculate new offsets to zoom toward focus point
-                    val focusRatioX = (focusX - mOffsetX) / (width * mScale)
-                    val focusRatioY = (focusY - mOffsetY) / (height * mScale)
+                    // Get focus point (between fingers) in screen coordinates
+                    val focusX = detector.focusX
+                    val focusY = detector.focusY
 
+                    // Calculate the point in content coordinates before scale
+                    // Account for current scroll offset and horizontal pan
+                    val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
+                    val contentX = (focusX - mOffsetX) / mScale
+                    val contentY = (focusY + currentScrollY) / mScale
+
+                    // Update scale
                     mScale = newScale
 
-                    mOffsetX = focusX - focusRatioX * width * mScale
-                    mOffsetY = focusY - focusRatioY * height * mScale
+                    // Calculate new horizontal offset to keep focus point stationary
+                    mOffsetX = focusX - contentX * mScale
+
+                    // Calculate new scroll position to keep vertical focus point stationary
+                    val newScrollY = (contentY * mScale - focusY).toInt().coerceAtLeast(0)
 
                     constrainOffset()
                     applyTransform()
+
+                    // Update scroll position to keep focus point in place
+                    val scrollDelta = newScrollY - currentScrollY
+                    if (scrollDelta != 0) {
+                        mRecyclerView.scrollBy(0, scrollDelta)
+                    }
+
                     onZoomChange()
                 }
                 return true
