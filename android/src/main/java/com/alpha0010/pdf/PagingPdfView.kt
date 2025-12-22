@@ -592,48 +592,38 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
 
         // Gesture detector for double-tap and single tap
         gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                return true // Must return true to receive other events
+            }
+
+            // onSingleTapUp fires immediately - used for edge taps (instant response)
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                val tapX = e.x
+                val edgeRatio = edgeTapZone / 100f
+                val leftEdge = width * edgeRatio
+                val rightEdge = width * (1f - edgeRatio)
+
+                // Only handle edge taps here (instant response)
+                if (tapX < leftEdge || tapX > rightEdge) {
+                    handleEdgeTap(tapX)
+                    return true
+                }
+                return false
+            }
+
+            // onSingleTapConfirmed fires after double-tap timeout - used for middle zone only
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val tapX = e.x
                 val edgeRatio = edgeTapZone / 100f
                 val leftEdge = width * edgeRatio
                 val rightEdge = width * (1f - edgeRatio)
 
-                val viewportHeight = height
-                val contentHeight = (imageView.height * scale).toInt()
-                val currentOffset = scrollView.scrollY
-                val maxOffset = (contentHeight - viewportHeight).coerceAtLeast(0)
-
-                // Check if landscape mode
-                val isLandscape = width > height
-
-                when {
-                    tapX < leftEdge -> {
-                        // Left zone - scroll up or previous page
-                        if (currentOffset <= 0 && offsetX >= 0) {
-                            // In landscape mode, go to previous page scrolled to bottom
-                            onPreviousPage?.invoke(isLandscape)
-                        } else {
-                            val newOffset = (currentOffset - viewportHeight).coerceAtLeast(0)
-                            scrollView.smoothScrollTo(0, newOffset)
-                        }
-                        onTap?.invoke("left")
-                    }
-                    tapX > rightEdge -> {
-                        // Right zone - scroll down or next page
-                        if (currentOffset >= maxOffset - 1) {
-                            onNextPage?.invoke()
-                        } else {
-                            val newOffset = (currentOffset + viewportHeight).coerceAtMost(maxOffset)
-                            scrollView.smoothScrollTo(0, newOffset)
-                        }
-                        onTap?.invoke("right")
-                    }
-                    else -> {
-                        // Middle zone - call onMiddleClick
-                        onMiddleClick?.invoke()
-                    }
+                // Only handle middle zone here
+                if (tapX >= leftEdge && tapX <= rightEdge) {
+                    onMiddleClick?.invoke()
+                    return true
                 }
-                return true
+                return false
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -838,5 +828,43 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         bgColor = color
         setBackgroundColor(color)
         scrollView.setBackgroundColor(color)
+    }
+
+    private fun handleEdgeTap(tapX: Float) {
+        val edgeRatio = edgeTapZone / 100f
+        val leftEdge = width * edgeRatio
+        val rightEdge = width * (1f - edgeRatio)
+
+        val viewportHeight = height
+        val contentHeight = (imageView.height * scale).toInt()
+        val currentOffset = scrollView.scrollY
+        val maxOffset = (contentHeight - viewportHeight).coerceAtLeast(0)
+
+        // Check if landscape mode
+        val isLandscape = width > height
+
+        when {
+            tapX < leftEdge -> {
+                // Left zone - scroll up or previous page
+                if (currentOffset <= 0 && offsetX >= 0) {
+                    // In landscape mode, go to previous page scrolled to bottom
+                    onPreviousPage?.invoke(isLandscape)
+                } else {
+                    val newOffset = (currentOffset - viewportHeight).coerceAtLeast(0)
+                    scrollView.post { scrollView.smoothScrollTo(0, newOffset) }
+                }
+                onTap?.invoke("left")
+            }
+            tapX > rightEdge -> {
+                // Right zone - scroll down or next page
+                if (currentOffset >= maxOffset - 1) {
+                    onNextPage?.invoke()
+                } else {
+                    val newOffset = (currentOffset + viewportHeight).coerceAtMost(maxOffset)
+                    scrollView.post { scrollView.smoothScrollTo(0, newOffset) }
+                }
+                onTap?.invoke("right")
+            }
+        }
     }
 }
