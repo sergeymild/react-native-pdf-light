@@ -3,24 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/react-native-pdf-light)](https://www.npmjs.com/package/react-native-pdf-light)
 ![CI](https://github.com/alpha0010/react-native-pdf-viewer/workflows/CI/badge.svg)
 
-PDF viewer for React Native. Implemented with platform native render functions
-for smallest deploy size impact, and restricted feature set to simplify
-integration with larger systems.
-
-Includes prefabricated full document viewer based on `FlatList` and a single
-page render component to use as a building block for your own fully custom
-viewer.
+Native PDF viewer for React Native with pinch-to-zoom and page navigation support.
 
 Uses `android.graphics.pdf.PdfRenderer` on Android and `CGPDFDocument` on iOS.
-Unlike many native components in the wild, `react-native-pdf-light` provides
-full implementation of React Native shadow nodes. This simplifies UI
-development, since the component actually knows its own dimensions.
-
-Version 2.x, adds render support for annotations conforming the
-[PAS standard v1](https://github.com/alpha0010/paged-annotation). If
-annotation support is not needed, use 1.x for slightly reduced size.
-
-<img src="docs/annotation.png" alt="PDF Annotation" height="400">
 
 ## Installation
 
@@ -33,117 +18,105 @@ empty `.swift` file to the xcode project.
 
 ## Usage
 
-```js
-import { Pdf, PdfUtil } from 'react-native-pdf-light';
+```tsx
+import { PdfViewer } from 'react-native-pdf-light';
 
-PdfUtil.getPageCount(source).then(console.log);
+// Zoomable scrolling viewer (iOS only)
+<PdfViewer
+  viewerType="zoomable"
+  source="/path/to/document.pdf"
+  onLoadComplete={({ pageCount }) => console.log(`Loaded ${pageCount} pages`)}
+  onPageChange={(page) => console.log(`Current page: ${page}`)}
+/>
 
-<Pdf source={source} />
+// Paging viewer with horizontal swipe (iOS & Android)
+<PdfViewer
+  viewerType="paging"
+  source="/path/to/document.pdf"
+  onLoadComplete={({ pageCount }) => console.log(`Loaded ${pageCount} pages`)}
+/>
 ```
 
-If creating your own custom viewer to manage pages:
-```js
-import { PdfView } from 'react-native-pdf-light';
+## Components
 
-<PdfView page={page} source={source} />
+### `<PdfViewer />`
+
+Main PDF viewer component with two display modes.
+
+#### Common Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `viewerType` | `'zoomable' \| 'paging'` | required | Viewer display mode |
+| `source` | `string` | required | Path to PDF document |
+| `minZoom` | `number` | `1` | Minimum zoom level |
+| `maxZoom` | `number` | `3` | Maximum zoom level |
+| `edgeTapZone` | `number` | `15` | Edge tap zone size as percentage (0-50) |
+| `backgroundColor` | `string` | - | Background color behind PDF pages |
+| `onError` | `(event: PdfErrorEvent) => void` | - | Callback when an error occurs |
+| `onLayout` | `(event: LayoutChangeEvent) => void` | - | Callback for measuring the native view |
+| `onLoadComplete` | `(event: PdfLoadCompleteEvent) => void` | - | Callback when PDF load completes |
+| `onPageChange` | `(page: number) => void` | - | Callback when current page changes |
+| `onZoomChange` | `(scale: number) => void` | - | Callback when zoom level changes |
+| `onTap` | `(position: 'top' \| 'bottom' \| 'left' \| 'right') => void` | - | Callback when user taps on edge zones |
+| `onMiddleClick` | `() => void` | - | Callback when user taps in the middle zone |
+| `style` | `ViewStyle` | - | View stylesheet |
+
+#### Zoomable Viewer Props (`viewerType="zoomable"`)
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `pdfPaddingTop` | `number` | `0` | Extra padding at the top of scroll content (points) |
+| `pdfPaddingBottom` | `number` | `0` | Extra padding at the bottom of scroll content (points) |
+
+**Platform support:** iOS only
+
+**Features:**
+- Pinch-to-zoom entire document
+- Vertical scrolling through pages
+- Smooth native scrolling and zooming
+
+#### Paging Viewer Props (`viewerType="paging"`)
+
+**Platform support:** iOS & Android
+
+**Features:**
+- Horizontal page swiping (like a book)
+- Per-page pinch-to-zoom
+- Page swiping is disabled while zoomed in
+- Double-tap to zoom in/out
+
+#### Methods (via ref)
+
+```tsx
+const pdfRef = useRef<PdfViewerRef>(null);
+
+// Reset zoom to default (scale = 1)
+pdfRef.current?.resetZoom();
+
+// Scroll to specific page (0-indexed)
+pdfRef.current?.scrollToPage(5, true); // animated
 ```
 
-For zoom support, install `react-native-gesture-handler` and use deep import.
-Note that `react-native-gesture-handler` is only required to use zoom
-features; the other display options do not have any dependencies.
-```js
-import { ZoomPdfView } from 'react-native-pdf-light/Zoom';
+#### Event Types
 
-<ZoomPdfView page={page} source={source} />
+```tsx
+type PdfErrorEvent = { message: string };
+
+type PdfLoadCompleteEvent = {
+  width: number;
+  height: number;
+  pageCount: number;
+};
 ```
 
-#### `<Pdf ... />` Display a pdf.
+### `<NativeZoomablePdfScrollView />`
 
-Props:
-- `annotation: string`
-  - Optional: Path to annotation data. File assumed to be [PAS v1](https://github.com/alpha0010/paged-annotation#version-1).
-- `annotationStr: string`
-  - Optional: Stringified JSON of annotation data. Data assumed to be [PAS v1](https://github.com/alpha0010/paged-annotation#version-1).
-- `onError: (error: Error) => void`
-  - Optional: Callback to handle errors.
-- `onLoadComplete: (numberOfPages: number) => void`
-  - Optional: Callback to handle pdf load completion.
-  - Passed the page count of the loaded pdf.
-- `onMeasurePages: (measurements: { itemHeight: number, offset: number }[]) => void`
-  - Optional: Callback to receive layout details of all pages.
-- `shrinkToFit: 'never' | 'portrait' | 'landscape' | 'always'`
-  - Optional: Size pages such that each page can be displayed without cutoff.
-  - Applies when device is in the specified orientation.
-- `source: string`
-  - Document to display.
+Low-level native scrollable PDF viewer with global zoom support. Available as a direct export for advanced use cases.
 
-The following props are forwarded to the underlying
-[`FlatList`](https://reactnative.dev/docs/flatlist) component:
-- `initialScrollIndex`
-- `ListEmptyComponent`
-- `onMomentumScrollBegin`
-- `onMomentumScrollEnd`
-- `onScroll`
-- `onScrollBeginDrag`
-- `onScrollEndDrag`
-- `refreshControl`
-- `scrollEventThrottle`
-
-Methods:
-- `scrollToIndex(index: number): void`
-  - Scroll to the specified page (0-indexed).
-- `scrollToOffset(offset: number): void`
-  - Scroll to the specified offset.
-
-#### `<PdfView ... />` Single page of a pdf.
-
-Props:
-- `annotation: string`
-  - Optional: Path to annotation data. File assumed to be [PAS v1](https://github.com/alpha0010/paged-annotation#version-1).
-- `annotationStr: string`
-  - Optional: Stringified JSON of annotation data. Data assumed to be [PAS v1](https://github.com/alpha0010/paged-annotation#version-1).
-- `page: number`
-  - Page (0-indexed) of document to display.
-- `resizeMode: 'contain' | 'fitWidth'`
-  - Optional: How pdf page should be scaled to fit in view dimensions.
-- `source: string`
-  - Document to display.
-- `style: ViewStyle`
-  - Optional: View stylesheet.
-
-#### `<ZoomPdfView ... />` Pinch zoomable single page of a pdf.
-
-Zoom interactions compatible with `react-native-pager-view` in horizontal
-display mode.
-
-Props:
-- All props from `PdfView`
-- `onZoomIn: () => void`
-  - Optional: Callback when view starts to zoom.
-- `onZoomReset: () => void`
-  - Optional: Callback when view returns to non-zoomed state.
-- `maximumZoom: number`
-  - Optional: Maximum allowed zoom. Default 2.
-- `refreshControl: <RefreshControl />`
-  - Optional: A [`RefreshControl`](https://reactnative.dev/docs/refreshcontrol) component, used to provide pull-to-refresh functionality for the internal ScrollView.
-
-#### `PdfUtil` Utility functions.
-
-`PdfUtil.getPageCount(source: string): Promise<number>`
-- Get the number of pages of a pdf.
-
-`PdfUtil.getPageSizes(source: string): Promise<{ height: number; width: number }[]>`
-- Get the dimensions of every page.
-
-## Known Issues
-
-On Android API level < 26 when directly rendering pages with `PdfView` at a
-non-default aspect ratio (e.g. setting both width and height of the view such
-that the view's aspect ratio does not match the pdf page's aspect ratio) if
-a page in the pdf is cropped or rotated, the page
-may render in the wrong position. This is due to a bug in the native
-`android.graphics.pdf.PdfRenderer`. (If you are aware of a fix,
-[pull requests welcome](https://github.com/alpha0010/react-native-pdf-viewer/pulls).)
+```tsx
+import { NativeZoomablePdfScrollView } from 'react-native-pdf-light';
+```
 
 ## Alternatives
 
