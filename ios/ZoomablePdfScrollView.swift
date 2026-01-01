@@ -8,6 +8,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     @objc var source = "" { didSet { reloadPdf() } }
 
+    @objc var annotations = "" {
+        didSet {
+            parseAnnotations()
+            imageCache.removeAllObjects()
+            collectionView?.reloadData()
+        }
+    }
+
     @objc var minZoom: CGFloat = 1.0 { didSet { updateZoomLimits() } }
     @objc var maxZoom: CGFloat = 3.0 { didSet { updateZoomLimits() } }
     @objc var edgeTapZone: CGFloat = 15.0
@@ -53,6 +61,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     // Image cache
     private var imageCache = NSCache<NSNumber, UIImage>()
+
+    // Parsed annotations
+    private var parsedAnnotations: [AnnotationPage] = []
 
     // Gesture recognizers
     private var doubleTapGesture: UITapGestureRecognizer!
@@ -418,6 +429,22 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         }
     }
 
+    // MARK: - Annotations
+
+    private func parseAnnotations() {
+        guard !annotations.isEmpty,
+              let data = annotations.data(using: .utf8) else {
+            parsedAnnotations = []
+            return
+        }
+
+        do {
+            parsedAnnotations = try JSONDecoder().decode([AnnotationPage].self, from: data)
+        } catch {
+            parsedAnnotations = []
+        }
+    }
+
     // MARK: - PDF Rendering
 
     private func renderPage(at index: Int, completion: @escaping (UIImage?) -> Void) {
@@ -426,12 +453,15 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
+        let annotation = index < parsedAnnotations.count ? parsedAnnotations[index] : nil
+
         PdfPageRenderer.renderPage(
             document: document,
             pageIndex: index,
             viewWidth: bounds.width,
             pdfPageWidth: pdfPageWidth,
             pdfPageHeight: pdfPageHeight,
+            annotation: annotation,
             completion: completion
         )
     }

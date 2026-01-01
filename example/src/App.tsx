@@ -1,7 +1,8 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useMemo } from 'react';
 import {
   NativeZoomablePdfScrollViewRef,
   PdfViewer,
+  type AnnotationPage,
 } from 'react-native-pdf-light';
 import { useAsset } from './assets.utils';
 import { StyleSheet, View } from 'react-native';
@@ -12,6 +13,39 @@ export default function App() {
 
   const pdfViewRef = useRef<NativeZoomablePdfScrollViewRef>(null);
   const pageIndicatorRef = useRef<PageIndicatorRef>(null);
+
+  // Example annotations - red rectangle on page 2 and text
+  const annotations = useMemo<AnnotationPage[]>(
+    () => [
+      // Page 1 - no annotations
+      { strokes: [], text: [] },
+      // Page 2 - red rectangle and text annotation
+      {
+        strokes: [
+          {
+            color: '#ff0000',
+            width: 3,
+            path: [
+              [0.1, 0.1], // top-left
+              [0.9, 0.1], // top-right
+              [0.9, 0.2], // bottom-right
+              [0.1, 0.2], // bottom-left
+              [0.1, 0.1], // close rectangle
+            ],
+          },
+        ],
+        text: [
+          {
+            color: '#0000ff',
+            fontSize: 16,
+            point: [0.1, 0.25],
+            str: 'This is an annotation!',
+          },
+        ],
+      },
+    ],
+    []
+  );
 
   const handleLoadComplete = useCallback(
     (event: { width: number; height: number; pageCount: number }) => {
@@ -43,6 +77,7 @@ export default function App() {
         viewerType="zoomable"
         ref={pdfViewRef}
         source={source}
+        annotations={annotations}
         minZoom={1}
         maxZoom={2}
         backgroundColor="#ffffff"

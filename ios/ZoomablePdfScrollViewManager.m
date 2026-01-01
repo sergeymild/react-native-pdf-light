@@ -3,6 +3,7 @@
 @interface RCT_EXTERN_REMAP_MODULE(RNZoomablePdfScrollView, ZoomablePdfScrollViewManager, RCTViewManager)
 
 RCT_EXPORT_VIEW_PROPERTY(source, NSString)
+RCT_EXPORT_VIEW_PROPERTY(annotations, NSString)
 RCT_EXPORT_VIEW_PROPERTY(minZoom, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(maxZoom, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(edgeTapZone, CGFloat)

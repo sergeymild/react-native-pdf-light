@@ -16,6 +16,42 @@ export type PdfLoadCompleteEvent = {
   pageCount: number;
 };
 
+// --- Annotation Types ---
+
+/**
+ * A stroke (line) annotation with normalized coordinates (0-1).
+ */
+export type AnnotationStroke = {
+  /** Hex color string (e.g., "#ff0000") */
+  color: string;
+  /** Line width in points */
+  width: number;
+  /** Array of [x, y] points, normalized 0-1 relative to page dimensions */
+  path: number[][];
+};
+
+/**
+ * A text annotation with normalized position (0-1).
+ */
+export type AnnotationText = {
+  /** Hex color string (e.g., "#000000") */
+  color: string;
+  /** Font size in points */
+  fontSize: number;
+  /** Position [x, y], normalized 0-1 relative to page dimensions */
+  point: number[];
+  /** Text content */
+  str: string;
+};
+
+/**
+ * Annotations for a single page.
+ */
+export type AnnotationPage = {
+  strokes: AnnotationStroke[];
+  text: AnnotationText[];
+};
+
 // --- Common Props ---
 
 type PdfViewerCommonProps = {
@@ -23,6 +59,13 @@ type PdfViewerCommonProps = {
    * Path to PDF document.
    */
   source: string;
+
+  /**
+   * Annotations to render on PDF pages.
+   * Array index corresponds to page number (0-based).
+   * Each element contains strokes and text for that page.
+   */
+  annotations?: AnnotationPage[];
 
   /**
    * Minimum zoom level. Default: 1.

@@ -33,10 +33,31 @@ export type ZoomablePdfTapEvent = {
   position: 'top' | 'bottom' | 'left' | 'right';
 };
 
+// --- Annotation Types ---
+
+export type AnnotationStroke = {
+  color: string;
+  width: number;
+  path: number[][];
+};
+
+export type AnnotationText = {
+  color: string;
+  fontSize: number;
+  point: number[];
+  str: string;
+};
+
+export type AnnotationPage = {
+  strokes: AnnotationStroke[];
+  text: AnnotationText[];
+};
+
 // --- Native Props ---
 
 type NativeZoomablePdfScrollViewProps = {
   source: string;
+  annotations?: string; // JSON string of AnnotationPage[]
   minZoom: number;
   maxZoom: number;
   edgeTapZone: number;
@@ -68,6 +89,12 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    * Path to PDF document.
    */
   source: string;
+
+  /**
+   * Annotations to render on PDF pages.
+   * Array index corresponds to page number (0-based).
+   */
+  annotations?: AnnotationPage[];
 
   /**
    * Minimum zoom level. Default: 1.
@@ -184,6 +211,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
 >(function NativeZoomablePdfScrollView(props, ref) {
   const {
     source,
+    annotations,
     minZoom = 1,
     maxZoom = 3,
     edgeTapZone = 15,
@@ -269,6 +297,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
     <RNZoomablePdfScrollView
       ref={viewRef}
       source={asPath(source)}
+      annotations={annotations ? JSON.stringify(annotations) : undefined}
       minZoom={minZoom}
       maxZoom={maxZoom}
       edgeTapZone={Math.max(0, Math.min(50, edgeTapZone))}

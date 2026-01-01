@@ -35,6 +35,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     // Props
     private var mSource = ""
+    private var mAnnotations = ""
+    private var mParsedAnnotations: List<AnnotationPage> = emptyList()
     private var mMinScale = 1f
     private var mMaxScale = 3f
     private var mEdgeTapZone = 15f
@@ -318,6 +320,14 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             mSource = source
             reloadPdf()
         }
+    }
+
+    fun setAnnotations(annotations: String?) {
+        mAnnotations = annotations ?: ""
+        mParsedAnnotations = parseAnnotations(mAnnotations)
+        // Clear cache and reload to apply annotations
+        mImageCache.evictAll()
+        mAdapter.notifyDataSetChanged()
     }
 
     fun setMinZoom(minZoom: Float) {
@@ -746,13 +756,16 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
             if (viewWidth <= 0 || pageHeight <= 0) return
 
+            val annotation = if (pageIndex < mParsedAnnotations.size) mParsedAnnotations[pageIndex] else null
+
             renderScope.launch(Dispatchers.IO) {
                 val bitmap = PdfPageRenderer.renderPage(
                     renderer = renderer,
                     pdfMutex = pdfMutex,
                     pageIndex = pageIndex,
                     viewWidth = viewWidth,
-                    pageHeight = pageHeight
+                    pageHeight = pageHeight,
+                    annotation = annotation
                 )
 
                 bitmap?.let {

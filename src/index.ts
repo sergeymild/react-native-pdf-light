@@ -46,4 +46,7 @@ export {
   type PdfViewerRef,
   type PdfErrorEvent,
   type PdfLoadCompleteEvent,
+  type AnnotationPage,
+  type AnnotationStroke,
+  type AnnotationText,
 } from './PdfViewer';

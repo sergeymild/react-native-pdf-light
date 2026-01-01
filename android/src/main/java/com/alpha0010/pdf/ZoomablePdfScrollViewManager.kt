@@ -22,6 +22,11 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
         view.setSource(source ?: "")
     }
 
+    @ReactProp(name = "annotations")
+    fun setAnnotations(view: ZoomablePdfScrollView, annotations: String?) {
+        view.setAnnotations(annotations)
+    }
+
     @ReactProp(name = "minZoom")
     fun setMinZoom(view: ZoomablePdfScrollView, minZoom: Float) {
         view.setMinZoom(minZoom)

@@ -22,6 +22,11 @@ class PagingPdfViewManager(private val pdfMutex: Lock) : SimpleViewManager<Pagin
         view.setSource(source ?: "")
     }
 
+    @ReactProp(name = "annotations")
+    fun setAnnotations(view: PagingPdfView, annotations: String?) {
+        view.setAnnotations(annotations)
+    }
+
     @ReactProp(name = "minZoom")
     fun setMinZoom(view: PagingPdfView, minZoom: Float) {
         view.setMinZoom(minZoom)
