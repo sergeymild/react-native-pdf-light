@@ -747,25 +747,13 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             if (viewWidth <= 0 || pageHeight <= 0) return
 
             renderScope.launch(Dispatchers.IO) {
-                val bitmap = pdfMutex.withLock {
-                    try {
-                        val page = renderer.openPage(pageIndex)
-                        val bmp = Bitmap.createBitmap(viewWidth, pageHeight, Bitmap.Config.ARGB_8888)
-                        bmp.eraseColor(Color.WHITE)
-
-                        val matrix = Matrix()
-                        matrix.setScale(
-                            viewWidth.toFloat() / page.width,
-                            pageHeight.toFloat() / page.height
-                        )
-
-                        page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        page.close()
-                        bmp
-                    } catch (e: Exception) {
-                        null
-                    }
-                }
+                val bitmap = PdfPageRenderer.renderPage(
+                    renderer = renderer,
+                    pdfMutex = pdfMutex,
+                    pageIndex = pageIndex,
+                    viewWidth = viewWidth,
+                    pageHeight = pageHeight
+                )
 
                 bitmap?.let {
                     mImageCache.put(pageIndex, it)
