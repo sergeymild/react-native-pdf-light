@@ -426,64 +426,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        let viewWidth = bounds.width
-        let pageHeight = viewWidth * (pdfPageHeight / pdfPageWidth)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            guard let pdfPage = document.page(at: index + 1) else {
-                DispatchQueue.main.async { completion(nil) }
-                return
-            }
-
-            let pageBounds = pdfPage.getBoxRect(.cropBox)
-            let pdfWidth: CGFloat
-            let pdfHeight: CGFloat
-
-            if pdfPage.rotationAngle % 180 == 90 {
-                pdfWidth = pageBounds.height
-                pdfHeight = pageBounds.width
-            } else {
-                pdfWidth = pageBounds.width
-                pdfHeight = pageBounds.height
-            }
-
-            // Render at 2x for retina
-            let scale: CGFloat = 2.0
-            let renderSize = CGSize(width: viewWidth * scale, height: pageHeight * scale)
-
-            UIGraphicsBeginImageContextWithOptions(renderSize, true, 1.0)
-            guard let context = UIGraphicsGetCurrentContext() else {
-                UIGraphicsEndImageContext()
-                DispatchQueue.main.async { completion(nil) }
-                return
-            }
-
-            // Fill with white
-            UIColor.white.setFill()
-            context.fill(CGRect(origin: .zero, size: renderSize))
-
-            // Scale and flip for PDF rendering
-            context.translateBy(x: 0, y: renderSize.height)
-            context.scaleBy(x: renderSize.width / pdfWidth, y: -renderSize.height / pdfHeight)
-
-            context.concatenate(pdfPage.getDrawingTransform(
-                .cropBox,
-                rect: CGRect(x: 0, y: 0, width: pdfWidth, height: pdfHeight),
-                rotate: 0,
-                preserveAspectRatio: false
-            ))
-
-            context.interpolationQuality = .high
-            context.setRenderingIntent(.defaultIntent)
-            context.drawPDFPage(pdfPage)
-
-            let rendered = UIGraphicsGetImageFromCurrentImageContext()
-            UIGraphicsEndImageContext()
-
-            DispatchQueue.main.async {
-                completion(rendered)
-            }
-        }
+        PdfPageRenderer.renderPage(
+            document: document,
+            pageIndex: index,
+            viewWidth: bounds.width,
+            pdfPageWidth: pdfPageWidth,
+            pdfPageHeight: pdfPageHeight,
+            completion: completion
+        )
     }
 
     // MARK: - Public Commands
