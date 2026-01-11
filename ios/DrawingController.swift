@@ -125,8 +125,8 @@ class DrawingController {
     func handleTouchEnded(page: Int) {
         guard drawingMode != .view else { return }
 
-        if isDrawing, let stroke = activeStroke, !stroke.path.isEmpty, stroke.page == page {
-            finishStroke(page: page)
+        if isDrawing, let stroke = activeStroke, !stroke.path.isEmpty {
+            finishStroke(page: stroke.page)
         }
 
         isDrawing = false
@@ -146,11 +146,7 @@ class DrawingController {
     // MARK: - Private Methods
 
     private func finishStroke(page: Int) {
-        guard let stroke = activeStroke, stroke.page == page else { return }
-
-        // Get contentRect from the first point's context (we need to store this differently)
-        // For now, we'll rely on the delegate to provide proper context
-        // The path is already in content coordinates, we need to normalize it
+        guard let stroke = activeStroke else { return }
 
         let strokeId = UUID().uuidString
         let newStroke = DrawingStroke(
@@ -158,7 +154,7 @@ class DrawingController {
             color: strokeColor,
             width: strokeWidth,
             opacity: strokeOpacity,
-            path: stroke.path.map { [$0.x, $0.y] } // Store as content coordinates for now
+            path: stroke.path.map { [$0.x, $0.y] }
         )
 
         pageStrokes.addStroke(newStroke, toPage: page)
@@ -166,7 +162,8 @@ class DrawingController {
     }
 
     private func eraseStroke(at point: CGPoint, page: Int, contentRect: CGRect) {
-        let threshold: CGFloat = 20.0
+        // Threshold in normalized coordinates (0.05 = 5% of page dimension)
+        let threshold: CGFloat = 0.05
         let strokes = pageStrokes.getStrokes(forPage: page)
 
         for stroke in strokes.reversed() {
@@ -219,6 +216,7 @@ class DrawingController {
     func drawStrokes(in context: CGContext, page: Int, contentRect: CGRect, useNormalized: Bool = false, zoomScale: CGFloat = 1.0) {
         let strokes = pageStrokes.getStrokes(forPage: page)
 
+
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
@@ -234,12 +232,21 @@ class DrawingController {
     }
 
     /// Draw the active stroke being drawn
-    func drawActiveStroke(in context: CGContext, page: Int, contentRect: CGRect, zoomScale: CGFloat = 1.0) {
+    /// Note: Active stroke points may be in normalized (0-1) coordinates depending on how touch was handled
+    func drawActiveStroke(in context: CGContext, page: Int, contentRect: CGRect, zoomScale: CGFloat = 1.0, useNormalized: Bool = false) {
         guard let stroke = activeStroke, stroke.page == page, !stroke.path.isEmpty else { return }
 
+        // Convert points if needed
+        let points: [CGPoint]
+        if useNormalized && !contentRect.isEmpty {
+            points = stroke.path.map { normalizedToContent([$0.x, $0.y], contentRect: contentRect) }
+        } else {
+            points = stroke.path
+        }
+
         // Single point - draw a dot
-        if stroke.path.count == 1 {
-            let point = stroke.path[0]
+        if points.count == 1 {
+            let point = points[0]
             let color = parseColor(strokeColor).withAlphaComponent(strokeOpacity)
             let radius = strokeWidth / zoomScale / 2
             context.setFillColor(color.cgColor)
@@ -254,23 +261,24 @@ class DrawingController {
         context.setLineJoin(.round)
 
         context.beginPath()
-        context.move(to: stroke.path[0])
+        context.move(to: points[0])
 
-        // For small strokes, don't skip any points
-        let minSkipDist: CGFloat = stroke.path.count < 10 ? 0 : 4
+        // For 2-point strokes, just draw a line
+        if points.count == 2 {
+            context.addLine(to: points[1])
+            context.strokePath()
+            return
+        }
 
-        var prevPoint = stroke.path[0]
-        for i in 1..<stroke.path.count {
-            let point = stroke.path[i]
-            let dist = hypot(point.x - prevPoint.x, point.y - prevPoint.y)
-            if dist < minSkipDist { continue }
-
+        var prevPoint = points[0]
+        for i in 1..<points.count {
+            let point = points[i]
             let midPoint = CGPoint(x: (prevPoint.x + point.x) / 2, y: (prevPoint.y + point.y) / 2)
             context.addQuadCurve(to: midPoint, control: prevPoint)
             prevPoint = point
         }
 
-        context.addLine(to: stroke.path.last!)
+        context.addLine(to: points.last!)
         context.strokePath()
     }
 
@@ -303,12 +311,22 @@ class DrawingController {
         } else {
             firstPoint = CGPoint(x: stroke.path[0][0], y: stroke.path[0][1])
         }
+        context.move(to: firstPoint)
+
+        // For 2-point strokes, just draw a line
+        if stroke.path.count == 2 {
+            let lastPoint: CGPoint
+            if useNormalized {
+                lastPoint = normalizedToContent(stroke.path[1], contentRect: contentRect)
+            } else {
+                lastPoint = CGPoint(x: stroke.path[1][0], y: stroke.path[1][1])
+            }
+            context.addLine(to: lastPoint)
+            context.strokePath()
+            return
+        }
+
         var prevPoint = firstPoint
-        context.move(to: prevPoint)
-
-        // For small strokes, don't skip any points
-        let minSkipDist: CGFloat = stroke.path.count < 10 ? 0 : 8
-
         for i in 1..<stroke.path.count {
             let point: CGPoint
             if useNormalized {
@@ -317,9 +335,6 @@ class DrawingController {
                 guard stroke.path[i].count >= 2 else { continue }
                 point = CGPoint(x: stroke.path[i][0], y: stroke.path[i][1])
             }
-
-            let dist = hypot(point.x - prevPoint.x, point.y - prevPoint.y)
-            if dist < minSkipDist { continue }
 
             let midPoint = CGPoint(x: (prevPoint.x + point.x) / 2, y: (prevPoint.y + point.y) / 2)
             context.addQuadCurve(to: midPoint, control: prevPoint)

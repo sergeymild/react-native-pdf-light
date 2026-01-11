@@ -2,7 +2,18 @@ import UIKit
 
 /// Transparent overlay view for rendering strokes in real-time on top of PDF content.
 /// This view is positioned on top of the PDF image and handles drawing/erasing touch events.
+/// Uses CATiledLayer for efficient rendering of large content.
 class DrawingOverlayView: UIView {
+
+    // MARK: - Layer Class Override
+
+    override class var layerClass: AnyClass {
+        return CATiledLayer.self
+    }
+
+    private var tiledLayer: CATiledLayer {
+        return layer as! CATiledLayer
+    }
 
     // MARK: - Properties
 
@@ -21,6 +32,11 @@ class DrawingOverlayView: UIView {
     /// Current zoom scale (used to adjust stroke width for consistent visual appearance)
     var zoomScale: CGFloat = 1.0
 
+    // Multi-page mode (for ZoomablePdfScrollView)
+    var multiPageMode: Bool = false
+    var pageCount: Int = 0
+    var pageHeight: CGFloat = 0
+
     // MARK: - Initialization
 
     override init(frame: CGRect) {
@@ -36,8 +52,13 @@ class DrawingOverlayView: UIView {
     private func setup() {
         backgroundColor = .clear
         isOpaque = false
-        // Allow touches to pass through when not drawing
+        contentMode = .redraw
         isUserInteractionEnabled = true
+
+        // Configure tiled layer for better performance
+        tiledLayer.tileSize = CGSize(width: 512, height: 512)
+        tiledLayer.levelsOfDetail = 1
+        tiledLayer.levelsOfDetailBias = 0
     }
 
     // MARK: - Drawing
@@ -46,22 +67,53 @@ class DrawingOverlayView: UIView {
         guard let context = UIGraphicsGetCurrentContext(),
               let controller = drawingController else { return }
 
-        // Draw completed strokes for this page
-        controller.drawStrokes(
-            in: context,
-            page: pageIndex,
-            contentRect: contentRect,
-            useNormalized: useNormalizedCoordinates,
-            zoomScale: zoomScale
-        )
+        if multiPageMode && pageCount > 0 && pageHeight > 0 {
+            // Only draw pages that intersect with the dirty rect for efficiency
+            let firstPage = max(0, Int(rect.minY / pageHeight))
+            let lastPage = min(pageCount - 1, Int(rect.maxY / pageHeight))
 
-        // Draw active stroke being drawn
-        controller.drawActiveStroke(
-            in: context,
-            page: pageIndex,
-            contentRect: contentRect,
-            zoomScale: zoomScale
-        )
+            for page in firstPage...lastPage {
+                let pageRect = CGRect(
+                    x: 0,
+                    y: CGFloat(page) * pageHeight,
+                    width: bounds.width,
+                    height: pageHeight
+                )
+
+                controller.drawStrokes(
+                    in: context,
+                    page: page,
+                    contentRect: pageRect,
+                    useNormalized: useNormalizedCoordinates,
+                    zoomScale: zoomScale
+                )
+
+                controller.drawActiveStroke(
+                    in: context,
+                    page: page,
+                    contentRect: pageRect,
+                    zoomScale: zoomScale,
+                    useNormalized: useNormalizedCoordinates
+                )
+            }
+        } else {
+            // Single page mode
+            controller.drawStrokes(
+                in: context,
+                page: pageIndex,
+                contentRect: contentRect,
+                useNormalized: useNormalizedCoordinates,
+                zoomScale: zoomScale
+            )
+
+            controller.drawActiveStroke(
+                in: context,
+                page: pageIndex,
+                contentRect: contentRect,
+                zoomScale: zoomScale,
+                useNormalized: useNormalizedCoordinates
+            )
+        }
     }
 
     // MARK: - Touch Handling
@@ -75,7 +127,13 @@ class DrawingOverlayView: UIView {
         }
 
         let location = touch.location(in: self)
-        controller.handleTouchBegan(location, page: pageIndex, contentRect: contentRect)
+        let point: CGPoint
+        if useNormalizedCoordinates && !contentRect.isEmpty {
+            point = CGPoint(x: location.x / contentRect.width, y: location.y / contentRect.height)
+        } else {
+            point = location
+        }
+        controller.handleTouchBegan(point, page: pageIndex, contentRect: contentRect)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -87,7 +145,13 @@ class DrawingOverlayView: UIView {
         }
 
         let location = touch.location(in: self)
-        controller.handleTouchMoved(location, page: pageIndex, contentRect: contentRect)
+        let point: CGPoint
+        if useNormalizedCoordinates && !contentRect.isEmpty {
+            point = CGPoint(x: location.x / contentRect.width, y: location.y / contentRect.height)
+        } else {
+            point = location
+        }
+        controller.handleTouchMoved(point, page: pageIndex, contentRect: contentRect)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -117,6 +181,11 @@ class DrawingOverlayView: UIView {
             return nil
         }
 
+        // In multi-page mode, let parent view handle touches
+        if multiPageMode {
+            return nil
+        }
+
         // Only intercept touches when in drawing/erase/highlight mode
         if controller.drawingMode != .view {
             return super.hitTest(point, with: event)
@@ -128,6 +197,11 @@ class DrawingOverlayView: UIView {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard let controller = drawingController else {
+            return false
+        }
+
+        // In multi-page mode, let parent view handle touches
+        if multiPageMode {
             return false
         }
 

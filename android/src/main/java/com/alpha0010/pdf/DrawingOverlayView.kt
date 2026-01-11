@@ -192,21 +192,26 @@ class DrawingOverlayView(context: Context) : View(context) {
         val path = Path()
         if (points.isEmpty() || rect.isEmpty) return path
 
-        // For small strokes, don't skip any points
-        val minSkipDist = if (points.size < 10) 0f else 8f
+        val firstPoint = points.first()
+        val firstX = rect.left + firstPoint.x * rect.width()
+        val firstY = rect.top + firstPoint.y * rect.height()
+        path.moveTo(firstX, firstY)
 
-        var prevPoint = points.first()
-        var prevX = rect.left + prevPoint.x * rect.width()
-        var prevY = rect.top + prevPoint.y * rect.height()
-        path.moveTo(prevX, prevY)
+        // For 2-point strokes, just draw a straight line
+        if (points.size == 2) {
+            val lastPoint = points.last()
+            val lastX = rect.left + lastPoint.x * rect.width()
+            val lastY = rect.top + lastPoint.y * rect.height()
+            path.lineTo(lastX, lastY)
+            return path
+        }
 
+        var prevX = firstX
+        var prevY = firstY
         for (i in 1 until points.size) {
             val point = points[i]
             val x = rect.left + point.x * rect.width()
             val y = rect.top + point.y * rect.height()
-
-            val dist = hypot(prevX - x, prevY - y)
-            if (dist < minSkipDist) continue
 
             val midX = (prevX + x) / 2
             val midY = (prevY + y) / 2

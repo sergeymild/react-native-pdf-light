@@ -564,6 +564,7 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         // Setup drawing overlay on top of image view (inside same container so it zooms together)
         drawingOverlay.pageIndex = pageIndex
         drawingOverlay.drawingController = drawingController
+        drawingOverlay.useNormalizedCoordinates = true
         contentContainer.addSubview(drawingOverlay)
 
         // Double tap to zoom (only works in middle zone)

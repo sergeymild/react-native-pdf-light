@@ -139,6 +139,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         // Setup drawing overlay on top of collection view (inside same container so it zooms together)
         drawingOverlay.drawingController = drawingController
+        drawingOverlay.useNormalizedCoordinates = true
+        drawingOverlay.multiPageMode = true
         contentContainer.addSubview(drawingOverlay)
 
         // Double tap to zoom (only works in middle zone)
@@ -302,6 +304,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         // Update drawing overlay to match container
         drawingOverlay.frame = contentContainer.bounds
+        drawingOverlay.pageCount = actualPageCount
+        drawingOverlay.pageHeight = pageHeight
+        drawingOverlay.setNeedsDisplay()
 
         // Invalidate layout to recalculate cell sizes
         collectionView.collectionViewLayout.invalidateLayout()
@@ -426,7 +431,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     }
 
     func drawingControllerNeedsRedraw(_ controller: DrawingController) {
-        drawingOverlay.setNeedsDisplay()
+        // For CATiledLayer, we need to invalidate the visible tiles
+        let visibleRect = CGRect(
+            x: 0,
+            y: scrollView.contentOffset.y / scrollView.zoomScale,
+            width: bounds.width,
+            height: bounds.height / scrollView.zoomScale
+        )
+        drawingOverlay.layer.setNeedsDisplay(visibleRect)
     }
 
     // MARK: - PDF Loading
@@ -634,6 +646,31 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     // MARK: - Touch Handling for Drawing
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // In view mode, use default behavior
+        guard realDrawingMode != .view else {
+            return super.hitTest(point, with: event)
+        }
+
+        // In drawing mode, only intercept if point is within bounds
+        guard bounds.contains(point) else {
+            return nil
+        }
+
+        // Check if any subview wants this touch (could be a button or other control)
+        // We only intercept touches on the scrollView/content area, not on any overlay controls
+        for subview in subviews.reversed() {
+            if subview == scrollView { continue } // We'll handle scrollView specially
+            let pointInSubview = convert(point, to: subview)
+            if let hitView = subview.hitTest(pointInSubview, with: event) {
+                return hitView // Let the subview handle it
+            }
+        }
+
+        // Touch is in our bounds and no subview claimed it - intercept for drawing
+        return self
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard realDrawingMode != .view, let touch = touches.first else {
             super.touchesBegan(touches, with: event)
@@ -642,15 +679,17 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         let location = touch.location(in: contentContainer)
         let page = pageIndexForPoint(location)
-        let contentRect = contentRectForPage(page)
+        let pageRect = contentRectForPage(page)
 
-        // Convert to page-local coordinates
-        let localPoint = CGPoint(x: location.x, y: location.y - contentRect.minY)
+        // Convert to page-local coordinates then normalize to 0-1
+        let localX = location.x / pageRect.width
+        let localY = (location.y - pageRect.minY) / pageRect.height
+        let normalizedPoint = CGPoint(x: localX, y: localY)
 
         drawingOverlay.pageIndex = page
-        drawingOverlay.contentRect = CGRect(origin: .zero, size: contentRect.size)
+        drawingOverlay.contentRect = pageRect
 
-        drawingController.handleTouchBegan(localPoint, page: page, contentRect: CGRect(origin: .zero, size: contentRect.size))
+        drawingController.handleTouchBegan(normalizedPoint, page: page, contentRect: pageRect)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -661,12 +700,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         let location = touch.location(in: contentContainer)
         let page = pageIndexForPoint(location)
-        let contentRect = contentRectForPage(page)
+        let pageRect = contentRectForPage(page)
 
-        // Convert to page-local coordinates
-        let localPoint = CGPoint(x: location.x, y: location.y - contentRect.minY)
+        // Convert to page-local coordinates then normalize to 0-1
+        let localX = location.x / pageRect.width
+        let localY = (location.y - pageRect.minY) / pageRect.height
+        let normalizedPoint = CGPoint(x: localX, y: localY)
 
-        drawingController.handleTouchMoved(localPoint, page: page, contentRect: CGRect(origin: .zero, size: contentRect.size))
+        drawingController.handleTouchMoved(normalizedPoint, page: page, contentRect: pageRect)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -693,6 +734,15 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     // MARK: - UIGestureRecognizerDelegate
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Disable all tap gestures in drawing mode
+        if realDrawingMode != .view {
+            if gestureRecognizer === edgeTapGesture ||
+               gestureRecognizer === middleTapGesture ||
+               gestureRecognizer === doubleTapGesture {
+                return false
+            }
+        }
+
         let tapLocation = gestureRecognizer.location(in: self)
         let edgeRatio = edgeTapZone / 100.0
         let leftEdge = bounds.width * edgeRatio
