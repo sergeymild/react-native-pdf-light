@@ -1,21 +1,6 @@
 import UIKit
 
-// MARK: - Drawing Types
-
-enum DrawingMode: String {
-    case view = "view"
-    case draw = "draw"
-    case erase = "erase"
-    case highlight = "highlight"
-}
-
-struct DrawingStroke: Codable {
-    let id: String
-    let color: String
-    let width: CGFloat
-    let opacity: CGFloat
-    let path: [[CGFloat]]
-}
+// DrawingMode and DrawingStroke are now shared from DrawingTypes.swift
 
 // MARK: - DrawablePdfView
 

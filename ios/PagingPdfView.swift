@@ -2,7 +2,7 @@ import UIKit
 
 // MARK: - PagingPdfView (paged PDF viewer with per-page zoom using UIPageViewController)
 
-class PagingPdfView: UIView {
+class PagingPdfView: UIView, DrawingControllerDelegate {
 
     // MARK: - React Props
 
@@ -30,6 +30,14 @@ class PagingPdfView: UIView {
         didSet { updateBackgroundColor() }
     }
 
+    // MARK: - Drawing Props
+
+    @objc var drawingMode = "view" { didSet { updateDrawingMode() } }
+    @objc var strokeColor = "#000000" { didSet { drawingController.strokeColor = strokeColor } }
+    @objc var strokeWidth: CGFloat = 3.0 { didSet { drawingController.strokeWidth = strokeWidth } }
+    @objc var strokeOpacity: CGFloat = 1.0 { didSet { drawingController.strokeOpacity = strokeOpacity } }
+    @objc var strokes = "" { didSet { loadStrokes() } }
+
     // MARK: - React Events
 
     @objc var onPdfError: RCTDirectEventBlock?
@@ -46,6 +54,10 @@ class PagingPdfView: UIView {
     @objc var onZoomChange: RCTDirectEventBlock?
     @objc var onTap: RCTDirectEventBlock?
     @objc var onMiddleClick: RCTDirectEventBlock?
+
+    // Drawing events
+    @objc var onDrawingStart: RCTDirectEventBlock?
+    @objc var onDrawingEnd: RCTDirectEventBlock?
 
     // Store load complete event if callback not yet set
     private var pendingLoadCompleteEvent: [String: Any]?
@@ -70,6 +82,10 @@ class PagingPdfView: UIView {
     // Parsed annotations
     private var parsedAnnotations: [AnnotationPage] = []
 
+    // Drawing controller
+    private let drawingController = DrawingController()
+    private var realDrawingMode = DrawingMode.view
+
     // MARK: - Initialization
 
     override init(frame: CGRect) {
@@ -86,6 +102,9 @@ class PagingPdfView: UIView {
         backgroundColor = pdfBackgroundColor
         imageCache.countLimit = 5 // Cache up to 5 rendered pages
 
+        // Setup drawing controller
+        drawingController.delegate = self
+
         // Setup page view controller
       let options: [UIPageViewController.OptionsKey: Any] = [:]
         pageViewController = UIPageViewController(
@@ -98,6 +117,71 @@ class PagingPdfView: UIView {
         pageViewController.view.backgroundColor = .clear
 
         addSubview(pageViewController.view)
+    }
+
+    // MARK: - Drawing Mode
+
+    private func updateDrawingMode() {
+        guard let mode = DrawingMode(rawValue: drawingMode) else {
+            realDrawingMode = .view
+            drawingController.drawingMode = .view
+            return
+        }
+        realDrawingMode = mode
+        drawingController.drawingMode = mode
+
+        // Update current page view controller
+        if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
+            currentVC.updateDrawingMode(mode)
+        }
+    }
+
+    private func loadStrokes() {
+        guard !strokes.isEmpty else {
+            drawingController.clearAllStrokes()
+            return
+        }
+
+        do {
+            let data = strokes.data(using: .utf8)!
+            let pageStrokes = try JSONDecoder().decode(PageStrokes.self, from: data)
+            drawingController.setAllStrokes(pageStrokes)
+
+            // Redraw current page
+            if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
+                currentVC.redrawOverlay()
+            }
+        } catch {
+            onPdfError?(["message": "Failed to parse strokes: \(error.localizedDescription)"])
+        }
+    }
+
+    // MARK: - DrawingControllerDelegate
+
+    func drawingController(_ controller: DrawingController, didAddStroke stroke: DrawingStroke, onPage page: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingController(_ controller: DrawingController, didRemoveStroke strokeId: String, onPage page: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingController(_ controller: DrawingController, strokesCleared onPage: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingControllerDidStartDrawing(_ controller: DrawingController) {
+        onDrawingStart?([:])
+    }
+
+    func drawingControllerDidEndDrawing(_ controller: DrawingController) {
+        onDrawingEnd?([:])
+    }
+
+    func drawingControllerNeedsRedraw(_ controller: DrawingController) {
+        if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
+            currentVC.redrawOverlay()
+        }
     }
 
     private func updateBackgroundColor() {
@@ -251,6 +335,8 @@ class PagingPdfView: UIView {
         pageVC.edgeTapZone = edgeTapZone
         pageVC.pageBackgroundColor = pdfBackgroundColor
         pageVC.shouldScrollToBottomOnLoad = scrollToBottom
+        pageVC.drawingController = drawingController
+        pageVC.updateDrawingMode(realDrawingMode)
         pageVC.onZoomChange = { [weak self] scale in
             self?.onZoomChange?(["scale": scale])
         }
@@ -335,6 +421,23 @@ class PagingPdfView: UIView {
         onPageChange?(["page": page])
     }
 
+    func clearStrokes(page: Int) {
+        if page >= 0 {
+            drawingController.clearStrokes(forPage: page)
+        } else {
+            // Clear all pages
+            drawingController.clearAllStrokes()
+        }
+        if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
+            currentVC.redrawOverlay()
+        }
+    }
+
+    /// Get all annotations (strokes) from all pages
+    func getAnnotations() -> [String: Any] {
+        return drawingController.getAnnotationsForExport()
+    }
+
     // MARK: - Cleanup
 
     func clearCache() {
@@ -408,6 +511,11 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
 
     var shouldScrollToBottomOnLoad = false
 
+    // Drawing support
+    weak var drawingController: DrawingController?
+    private var currentDrawingMode: DrawingMode = .view
+    private let drawingOverlay = DrawingOverlayView()
+
     var isAtMinZoom: Bool {
         return scrollView.zoomScale <= minZoom + 0.01
     }
@@ -439,6 +547,11 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .white
         scrollView.addSubview(imageView)
+
+        // Setup drawing overlay on top of image view
+        drawingOverlay.pageIndex = pageIndex
+        drawingOverlay.drawingController = drawingController
+        scrollView.addSubview(drawingOverlay)
 
         // Double tap to zoom (only works in middle zone)
         doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
@@ -497,7 +610,25 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         imageView.frame = CGRect(x: 0, y: 0, width: viewSize.width, height: scaledHeight)
         scrollView.contentSize = imageView.frame.size
 
+        // Update drawing overlay to match image view
+        drawingOverlay.frame = imageView.frame
+        drawingOverlay.contentRect = imageView.bounds
+
         updateContentInset()
+    }
+
+    func updateDrawingMode(_ mode: DrawingMode) {
+        currentDrawingMode = mode
+
+        // Disable all scroll/zoom gestures in drawing modes (draw, erase, highlight)
+        let isViewMode = mode == .view
+        scrollView.isScrollEnabled = isViewMode
+        scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
+        doubleTapGesture.isEnabled = isViewMode
+    }
+
+    func redrawOverlay() {
+        drawingOverlay.setNeedsDisplay()
     }
 
     private func updateContentInset() {
@@ -590,6 +721,9 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         updateContentInset()
+        // Update drawing overlay zoom scale for consistent stroke width
+        drawingOverlay.zoomScale = scrollView.zoomScale
+        drawingOverlay.setNeedsDisplay()
         onZoomChange?(scrollView.zoomScale)
     }
 

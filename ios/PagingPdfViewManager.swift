@@ -27,4 +27,31 @@ class PagingPdfViewManager: RCTViewManager {
             view.scrollToPage(page, animated: animated)
         }
     }
+
+    @objc func clearStrokes(_ node: NSNumber, page: Int) {
+        guard let uiManager = bridge.uiManager else { return }
+        uiManager.addUIBlock { (_, viewRegistry) in
+            guard let viewRegistry,
+                  let view = viewRegistry[node] as? PagingPdfView else { return }
+            view.clearStrokes(page: page)
+        }
+    }
+
+    @objc func getAnnotations(_ node: NSNumber,
+                               resolver: @escaping RCTPromiseResolveBlock,
+                               rejecter: @escaping RCTPromiseRejectBlock) {
+        guard let uiManager = bridge.uiManager else {
+            rejecter("ERROR", "UIManager not available", nil)
+            return
+        }
+        uiManager.addUIBlock { (_, viewRegistry) in
+            guard let viewRegistry,
+                  let view = viewRegistry[node] as? PagingPdfView else {
+                rejecter("ERROR", "View not found", nil)
+                return
+            }
+            let annotations = view.getAnnotations()
+            resolver(annotations)
+        }
+    }
 }

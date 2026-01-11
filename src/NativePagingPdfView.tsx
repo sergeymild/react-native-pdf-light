@@ -8,11 +8,14 @@ import {
   findNodeHandle,
   LayoutChangeEvent,
   NativeSyntheticEvent,
+  NativeModules,
   processColor,
   requireNativeComponent,
   UIManager,
   ViewStyle,
 } from 'react-native';
+import type { DrawingMode, DrawingTool } from './drawing/types';
+import { DEFAULT_DRAWING_TOOL } from './drawing/types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -34,8 +37,10 @@ export type PagingPdfTapEvent = { position: 'top' | 'bottom' | 'left' | 'right' 
 // --- Annotation Types ---
 
 export type AnnotationStroke = {
+  id?: string;
   color: string;
   width: number;
+  opacity?: number;
   path: number[][];
 };
 
@@ -61,6 +66,12 @@ type NativePagingPdfViewProps = {
   edgeTapZone: number;
   pdfBackgroundColor?: ReturnType<typeof processColor>;
 
+  // Drawing props
+  drawingMode: string;
+  strokeColor: string;
+  strokeWidth: number;
+  strokeOpacity: number;
+
   onLayout?: (event: LayoutChangeEvent) => void;
   onPdfError: (event: NativeSyntheticEvent<PagingPdfErrorEvent>) => void;
   onPdfLoadComplete: (
@@ -70,6 +81,10 @@ type NativePagingPdfViewProps = {
   onZoomChange: (event: NativeSyntheticEvent<PagingPdfZoomChangeEvent>) => void;
   onTap: (event: NativeSyntheticEvent<PagingPdfTapEvent>) => void;
   onMiddleClick: (event: NativeSyntheticEvent<{}>) => void;
+
+  // Drawing events
+  onDrawingStart: (event: NativeSyntheticEvent<{}>) => void;
+  onDrawingEnd: (event: NativeSyntheticEvent<{}>) => void;
 
   style?: ViewStyle;
 };
@@ -113,6 +128,20 @@ export type NativePagingPdfViewProps_Public = {
   backgroundColor?: string;
 
   /**
+   * Drawing mode.
+   * - 'view': No drawing, just viewing (zoom enabled)
+   * - 'draw': Drawing mode with current tool (zoom disabled)
+   * - 'erase': Erase strokes by touching them (zoom disabled)
+   * - 'highlight': Drawing with highlighter (zoom disabled)
+   */
+  drawingMode?: DrawingMode;
+
+  /**
+   * Drawing tool configuration.
+   */
+  drawingTool?: DrawingTool;
+
+  /**
    * Callback when an error occurs.
    */
   onError?: (event: PagingPdfErrorEvent) => void;
@@ -148,6 +177,16 @@ export type NativePagingPdfViewProps_Public = {
    */
   onMiddleClick?: () => void;
 
+  /**
+   * Callback when drawing starts.
+   */
+  onDrawingStart?: () => void;
+
+  /**
+   * Callback when drawing ends.
+   */
+  onDrawingEnd?: () => void;
+
   style?: ViewStyle;
 };
 
@@ -163,6 +202,19 @@ export type NativePagingPdfViewRef = {
    * Scroll to specific page.
    */
   scrollToPage: (page: number, animated?: boolean) => void;
+
+  /**
+   * Clear strokes for a specific page or all pages.
+   * @param page Page index to clear, or -1 to clear all pages.
+   */
+  clearStrokes: (page?: number) => void;
+
+  /**
+   * Get all annotations (strokes) from all pages.
+   * Returns a promise with Record<pageIndex, strokes[]>.
+   * Strokes are stored natively - use this to retrieve them when needed.
+   */
+  getAnnotations: () => Promise<Record<string, AnnotationStroke[]>>;
 };
 
 // --- Native component ---
@@ -195,6 +247,8 @@ export const NativePagingPdfView = forwardRef<
     maxZoom = 3,
     edgeTapZone = 15,
     backgroundColor,
+    drawingMode = 'view',
+    drawingTool = DEFAULT_DRAWING_TOOL,
     onError,
     onLayout,
     onLoadComplete,
@@ -202,6 +256,8 @@ export const NativePagingPdfView = forwardRef<
     onZoomChange,
     onTap,
     onMiddleClick,
+    onDrawingStart,
+    onDrawingEnd,
     style,
   } = props;
 
@@ -227,6 +283,26 @@ export const NativePagingPdfView = forwardRef<
           ]);
         }
       }
+    },
+    clearStrokes: (page = -1) => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
+        }
+      }
+    },
+    getAnnotations: async (): Promise<Record<string, AnnotationStroke[]>> => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          const manager = NativeModules.RNPagingPdfView;
+          if (manager?.getAnnotations) {
+            return manager.getAnnotations(handle);
+          }
+        }
+      }
+      return {};
     },
   }));
 
@@ -270,6 +346,20 @@ export const NativePagingPdfView = forwardRef<
     onMiddleClick?.();
   }, [onMiddleClick]);
 
+  const handleDrawingStart = useCallback(
+    (_event: NativeSyntheticEvent<{}>) => {
+      onDrawingStart?.();
+    },
+    [onDrawingStart]
+  );
+
+  const handleDrawingEnd = useCallback(
+    (_event: NativeSyntheticEvent<{}>) => {
+      onDrawingEnd?.();
+    },
+    [onDrawingEnd]
+  );
+
   return (
     <RNPagingPdfView
       ref={viewRef}
@@ -279,6 +369,10 @@ export const NativePagingPdfView = forwardRef<
       maxZoom={maxZoom}
       edgeTapZone={Math.max(0, Math.min(50, edgeTapZone))}
       pdfBackgroundColor={backgroundColor ? processColor(backgroundColor) : undefined}
+      drawingMode={drawingMode}
+      strokeColor={drawingTool.color}
+      strokeWidth={drawingTool.strokeWidth}
+      strokeOpacity={drawingTool.opacity}
       onLayout={onLayout}
       onPdfError={handlePdfError}
       onPdfLoadComplete={handlePdfLoadComplete}
@@ -286,6 +380,8 @@ export const NativePagingPdfView = forwardRef<
       onZoomChange={handleZoomChange}
       onTap={handleTap}
       onMiddleClick={handleMiddleClick}
+      onDrawingStart={handleDrawingStart}
+      onDrawingEnd={handleDrawingEnd}
       style={style}
     />
   );

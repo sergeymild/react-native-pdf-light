@@ -2,7 +2,7 @@ import UIKit
 
 // MARK: - ZoomablePdfScrollView (scrollable PDF viewer with global zoom using UICollectionView)
 
-class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
+class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, DrawingControllerDelegate {
 
     // MARK: - React Props
 
@@ -26,6 +26,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         didSet { updateBackgroundColor() }
     }
 
+    // MARK: - Drawing Props
+
+    @objc var drawingMode = "view" { didSet { updateDrawingMode() } }
+    @objc var strokeColor = "#000000" { didSet { drawingController.strokeColor = strokeColor } }
+    @objc var strokeWidth: CGFloat = 3.0 { didSet { drawingController.strokeWidth = strokeWidth } }
+    @objc var strokeOpacity: CGFloat = 1.0 { didSet { drawingController.strokeOpacity = strokeOpacity } }
+    @objc var strokes = "" { didSet { loadStrokes() } }
+
     // MARK: - React Events
 
     @objc var onPdfError: RCTDirectEventBlock?
@@ -43,12 +51,17 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     @objc var onTap: RCTDirectEventBlock?
     @objc var onMiddleClick: RCTDirectEventBlock?
 
+    // Drawing events
+    @objc var onDrawingStart: RCTDirectEventBlock?
+    @objc var onDrawingEnd: RCTDirectEventBlock?
+
     // Store load complete event if callback not yet set
     private var pendingLoadCompleteEvent: [String: Any]?
 
     // MARK: - Private State
 
     private let scrollView = UIScrollView()
+    private let contentContainer = UIView() // Container for both collectionView and drawingOverlay
     private var collectionView: UICollectionView!
     private var pdfDocument: CGPDFDocument?
     private var currentPage: Int = 0
@@ -70,6 +83,11 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     private var edgeTapGesture: UITapGestureRecognizer!
     private var middleTapGesture: UITapGestureRecognizer!
 
+    // Drawing controller
+    private let drawingController = DrawingController()
+    private var realDrawingMode = DrawingMode.view
+    private let drawingOverlay = DrawingOverlayView()
+
     // MARK: - Initialization
 
     override init(frame: CGRect) {
@@ -85,6 +103,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     private func setupViews() {
         backgroundColor = pdfBackgroundColor
         imageCache.countLimit = 10 // Cache up to 10 rendered pages
+
+        // Setup drawing controller
+        drawingController.delegate = self
 
         // Setup outer scroll view (for zooming)
         scrollView.delegate = self
@@ -103,14 +124,22 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         layout.minimumLineSpacing = 0
         layout.minimumInteritemSpacing = 0
 
-        // Setup collection view
+        // Setup content container (this is what gets zoomed)
+        contentContainer.backgroundColor = .clear
+        scrollView.addSubview(contentContainer)
+
+        // Setup collection view inside container
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.backgroundColor = .clear
         collectionView.showsVerticalScrollIndicator = false
         collectionView.register(PdfPageCell.self, forCellWithReuseIdentifier: PdfPageCell.reuseId)
-        scrollView.addSubview(collectionView)
+        contentContainer.addSubview(collectionView)
+
+        // Setup drawing overlay on top of collection view (inside same container so it zooms together)
+        drawingOverlay.drawingController = drawingController
+        contentContainer.addSubview(drawingOverlay)
 
         // Double tap to zoom (only works in middle zone)
         doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
@@ -142,7 +171,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             }
         } else {
             // Zoom to point
-            let zoomRect = zoomRectForScale(maxZoom, center: gesture.location(in: collectionView))
+            let zoomRect = zoomRectForScale(maxZoom, center: gesture.location(in: contentContainer))
             scrollView.zoom(to: zoomRect, animated: true)
         }
     }
@@ -261,8 +290,15 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let pageHeight = viewWidth * (pdfPageHeight / pdfPageWidth)
         let totalHeight = (pageHeight) * CGFloat(actualPageCount)
 
-        collectionView.frame = CGRect(x: 0, y: 0, width: viewWidth, height: totalHeight)
+        // Update container frame
+        contentContainer.frame = CGRect(x: 0, y: 0, width: viewWidth, height: totalHeight)
+
+        // Collection view fills the container
+        collectionView.frame = contentContainer.bounds
         scrollView.contentSize = CGSize(width: viewWidth, height: totalHeight)
+
+        // Update drawing overlay to match container
+        drawingOverlay.frame = contentContainer.bounds
 
         // Invalidate layout to recalculate cell sizes
         collectionView.collectionViewLayout.invalidateLayout()
@@ -303,6 +339,91 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     private func updateBackgroundColor() {
         backgroundColor = pdfBackgroundColor
+    }
+
+    // MARK: - Drawing Mode
+
+    private func updateDrawingMode() {
+        guard let mode = DrawingMode(rawValue: drawingMode) else {
+            realDrawingMode = .view
+            drawingController.drawingMode = .view
+            return
+        }
+        realDrawingMode = mode
+        drawingController.drawingMode = mode
+
+        // Disable all scroll/zoom gestures in drawing modes (draw, erase, highlight)
+        let isViewMode = mode == .view
+        scrollView.isScrollEnabled = isViewMode
+        scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
+        doubleTapGesture.isEnabled = isViewMode
+    }
+
+    private func loadStrokes() {
+        guard !strokes.isEmpty else {
+            drawingController.clearAllStrokes()
+            drawingOverlay.setNeedsDisplay()
+            return
+        }
+
+        do {
+            let data = strokes.data(using: .utf8)!
+            let pageStrokes = try JSONDecoder().decode(PageStrokes.self, from: data)
+            drawingController.setAllStrokes(pageStrokes)
+            drawingOverlay.setNeedsDisplay()
+        } catch {
+            onPdfError?(["message": "Failed to parse strokes: \(error.localizedDescription)"])
+        }
+    }
+
+    // MARK: - Page Detection for Drawing
+
+    /// Determine which page a point in the collection view belongs to
+    private func pageIndexForPoint(_ point: CGPoint) -> Int {
+        guard pdfPageWidth > 0, pdfPageHeight > 0, actualPageCount > 0 else { return 0 }
+
+        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        let pageIndex = Int(point.y / pageHeight)
+        return max(0, min(pageIndex, actualPageCount - 1))
+    }
+
+    /// Get the content rect for a specific page (in collection view coordinates)
+    private func contentRectForPage(_ page: Int) -> CGRect {
+        guard pdfPageWidth > 0, pdfPageHeight > 0 else { return .zero }
+
+        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        return CGRect(
+            x: 0,
+            y: CGFloat(page) * pageHeight,
+            width: bounds.width,
+            height: pageHeight
+        )
+    }
+
+    // MARK: - DrawingControllerDelegate
+
+    func drawingController(_ controller: DrawingController, didAddStroke stroke: DrawingStroke, onPage page: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingController(_ controller: DrawingController, didRemoveStroke strokeId: String, onPage page: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingController(_ controller: DrawingController, strokesCleared onPage: Int) {
+        // Strokes are stored natively, no sync needed
+    }
+
+    func drawingControllerDidStartDrawing(_ controller: DrawingController) {
+        onDrawingStart?([:])
+    }
+
+    func drawingControllerDidEndDrawing(_ controller: DrawingController) {
+        onDrawingEnd?([:])
+    }
+
+    func drawingControllerNeedsRedraw(_ controller: DrawingController) {
+        drawingOverlay.setNeedsDisplay()
     }
 
     // MARK: - PDF Loading
@@ -399,11 +520,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     // MARK: - UIScrollViewDelegate
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-        return collectionView
+        return contentContainer
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         updateContentInset()
+        // Update drawing overlay zoom scale for consistent stroke width
+        drawingOverlay.zoomScale = scrollView.zoomScale
+        drawingOverlay.setNeedsDisplay()
         onZoomChange?(["scale": scrollView.zoomScale])
     }
 
@@ -484,10 +608,83 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         scrollView.setContentOffset(CGPoint(x: 0, y: yOffset * scrollView.zoomScale), animated: animated)
     }
 
+    func clearStrokes(page: Int) {
+        if page >= 0 {
+            drawingController.clearStrokes(forPage: page)
+        } else {
+            // Clear all pages
+            drawingController.clearAllStrokes()
+        }
+        drawingOverlay.setNeedsDisplay()
+    }
+
+    /// Get all annotations (strokes) from all pages
+    func getAnnotations() -> [String: Any] {
+        return drawingController.getAnnotationsForExport()
+    }
+
     // MARK: - Cleanup
 
     func clearCache() {
         imageCache.removeAllObjects()
+    }
+
+    // MARK: - Touch Handling for Drawing
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard realDrawingMode != .view, let touch = touches.first else {
+            super.touchesBegan(touches, with: event)
+            return
+        }
+
+        let location = touch.location(in: contentContainer)
+        let page = pageIndexForPoint(location)
+        let contentRect = contentRectForPage(page)
+
+        // Convert to page-local coordinates
+        let localPoint = CGPoint(x: location.x, y: location.y - contentRect.minY)
+
+        drawingOverlay.pageIndex = page
+        drawingOverlay.contentRect = CGRect(origin: .zero, size: contentRect.size)
+
+        drawingController.handleTouchBegan(localPoint, page: page, contentRect: CGRect(origin: .zero, size: contentRect.size))
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard realDrawingMode != .view, let touch = touches.first else {
+            super.touchesMoved(touches, with: event)
+            return
+        }
+
+        let location = touch.location(in: contentContainer)
+        let page = pageIndexForPoint(location)
+        let contentRect = contentRectForPage(page)
+
+        // Convert to page-local coordinates
+        let localPoint = CGPoint(x: location.x, y: location.y - contentRect.minY)
+
+        drawingController.handleTouchMoved(localPoint, page: page, contentRect: CGRect(origin: .zero, size: contentRect.size))
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard realDrawingMode != .view, let touch = touches.first else {
+            super.touchesEnded(touches, with: event)
+            return
+        }
+
+        let location = touch.location(in: contentContainer)
+        let page = pageIndexForPoint(location)
+
+        drawingController.handleTouchEnded(page: page)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard realDrawingMode != .view else {
+            super.touchesCancelled(touches, with: event)
+            return
+        }
+
+        drawingController.handleTouchCancelled()
     }
 
     // MARK: - UIGestureRecognizerDelegate

@@ -5,6 +5,7 @@ import {
   NativeZoomablePdfScrollView,
   type NativeZoomablePdfScrollViewRef,
 } from './NativeZoomablePdfScrollView';
+import type { DrawingMode, DrawingTool } from './drawing/types';
 
 // --- Unified Event Types ---
 
@@ -22,10 +23,14 @@ export type PdfLoadCompleteEvent = {
  * A stroke (line) annotation with normalized coordinates (0-1).
  */
 export type AnnotationStroke = {
+  /** Unique identifier (required for user-drawn strokes, optional for static) */
+  id?: string;
   /** Hex color string (e.g., "#ff0000") */
   color: string;
   /** Line width in points */
   width: number;
+  /** Stroke opacity 0-1 (default 1) */
+  opacity?: number;
   /** Array of [x, y] points, normalized 0-1 relative to page dimensions */
   path: number[][];
 };
@@ -122,6 +127,54 @@ type PdfViewerCommonProps = {
    * Callback when user taps in the middle zone.
    */
   onMiddleClick?: () => void;
+
+  // --- Drawing Props ---
+
+  /**
+   * Drawing mode.
+   * - 'view': No drawing, just viewing (zoom enabled)
+   * - 'draw': Drawing mode with current tool (zoom disabled)
+   * - 'erase': Erase strokes by touching them (zoom disabled)
+   * - 'highlight': Drawing with highlighter (zoom disabled)
+   */
+  drawingMode?: DrawingMode;
+
+  /**
+   * Drawing tool configuration.
+   */
+  drawingTool?: DrawingTool;
+
+  /**
+   * Callback when drawing starts.
+   */
+  onDrawingStart?: () => void;
+
+  /**
+   * Callback when drawing ends.
+   */
+  onDrawingEnd?: () => void;
+
+  /**
+   * Callback when a stroke is completed.
+   * Add the stroke to your annotations[page].strokes array.
+   * The stroke has required id and opacity fields.
+   */
+  onStrokeEnd?: (
+    stroke: AnnotationStroke & { id: string; opacity: number },
+    page: number
+  ) => void;
+
+  /**
+   * Callback when a stroke is removed (erased).
+   * Remove the stroke with this id from annotations[page].strokes.
+   */
+  onStrokeRemoved?: (strokeId: string, page: number) => void;
+
+  /**
+   * Callback when strokes are cleared.
+   * Clear annotations[page].strokes array.
+   */
+  onStrokesCleared?: (page: number) => void;
 
   style?: ViewStyle;
 };

@@ -8,11 +8,14 @@ import {
   findNodeHandle,
   LayoutChangeEvent,
   NativeSyntheticEvent,
+  NativeModules,
   processColor,
   requireNativeComponent,
   UIManager,
   ViewStyle,
 } from 'react-native';
+import type { DrawingMode, DrawingTool } from './drawing/types';
+import { DEFAULT_DRAWING_TOOL } from './drawing/types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -36,8 +39,10 @@ export type ZoomablePdfTapEvent = {
 // --- Annotation Types ---
 
 export type AnnotationStroke = {
+  id?: string;
   color: string;
   width: number;
+  opacity?: number;
   path: number[][];
 };
 
@@ -65,6 +70,12 @@ type NativeZoomablePdfScrollViewProps = {
   pdfPaddingBottom: number;
   pdfBackgroundColor?: ReturnType<typeof processColor>;
 
+  // Drawing props
+  drawingMode: string;
+  strokeColor: string;
+  strokeWidth: number;
+  strokeOpacity: number;
+
   onLayout?: (event: LayoutChangeEvent) => void;
   onPdfError: (event: NativeSyntheticEvent<ZoomablePdfErrorEvent>) => void;
   onPdfLoadComplete: (
@@ -78,6 +89,10 @@ type NativeZoomablePdfScrollViewProps = {
   ) => void;
   onTap: (event: NativeSyntheticEvent<ZoomablePdfTapEvent>) => void;
   onMiddleClick: (event: NativeSyntheticEvent<{}>) => void;
+
+  // Drawing events
+  onDrawingStart: (event: NativeSyntheticEvent<{}>) => void;
+  onDrawingEnd: (event: NativeSyntheticEvent<{}>) => void;
 
   style?: ViewStyle;
 };
@@ -132,6 +147,20 @@ export type NativeZoomablePdfScrollViewProps_Public = {
   pdfPaddingBottom?: number;
 
   /**
+   * Drawing mode.
+   * - 'view': No drawing, just viewing (zoom enabled)
+   * - 'draw': Drawing mode with current tool (zoom disabled)
+   * - 'erase': Erase strokes by touching them (zoom disabled)
+   * - 'highlight': Drawing with highlighter (zoom disabled)
+   */
+  drawingMode?: DrawingMode;
+
+  /**
+   * Drawing tool configuration.
+   */
+  drawingTool?: DrawingTool;
+
+  /**
    * Callback when an error occurs.
    */
   onError?: (event: ZoomablePdfErrorEvent) => void;
@@ -168,6 +197,16 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    */
   onMiddleClick?: () => void;
 
+  /**
+   * Callback when drawing starts (finger down in draw mode).
+   */
+  onDrawingStart?: () => void;
+
+  /**
+   * Callback when drawing ends (finger up in draw mode).
+   */
+  onDrawingEnd?: () => void;
+
   style?: ViewStyle;
 };
 
@@ -183,6 +222,19 @@ export type NativeZoomablePdfScrollViewRef = {
    * Scroll to specific page.
    */
   scrollToPage: (page: number, animated?: boolean) => void;
+
+  /**
+   * Clear strokes for a specific page or all pages.
+   * @param page Page index to clear, or -1 to clear all pages.
+   */
+  clearStrokes: (page?: number) => void;
+
+  /**
+   * Get all annotations (strokes) from all pages.
+   * Returns a promise with Record<pageIndex, strokes[]>.
+   * Strokes are stored natively - use this to retrieve them when needed.
+   */
+  getAnnotations: () => Promise<Record<string, AnnotationStroke[]>>;
 };
 
 // --- Native component ---
@@ -202,6 +254,7 @@ const RNZoomablePdfScrollView =
  * - Pinch-to-zoom entire document
  * - Vertical scrolling through pages
  * - Smooth native scrolling and zooming
+ * - Drawing and annotation support
  *
  * Supported platforms: iOS
  */
@@ -218,6 +271,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
     pdfPaddingTop = 0,
     pdfPaddingBottom = 0,
     backgroundColor,
+    drawingMode = 'view',
+    drawingTool = DEFAULT_DRAWING_TOOL,
     onError,
     onLayout,
     onLoadComplete,
@@ -225,6 +280,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
     onZoomChange,
     onTap,
     onMiddleClick,
+    onDrawingStart,
+    onDrawingEnd,
     style,
   } = props;
 
@@ -250,6 +307,26 @@ export const NativeZoomablePdfScrollView = forwardRef<
           ]);
         }
       }
+    },
+    clearStrokes: (page = -1) => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
+        }
+      }
+    },
+    getAnnotations: async (): Promise<Record<string, AnnotationStroke[]>> => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          const manager = NativeModules.RNZoomablePdfScrollView;
+          if (manager?.getAnnotations) {
+            return manager.getAnnotations(handle);
+          }
+        }
+      }
+      return {};
     },
   }));
 
@@ -293,6 +370,20 @@ export const NativeZoomablePdfScrollView = forwardRef<
     onMiddleClick?.();
   }, [onMiddleClick]);
 
+  const handleDrawingStart = useCallback(
+    (_event: NativeSyntheticEvent<{}>) => {
+      onDrawingStart?.();
+    },
+    [onDrawingStart]
+  );
+
+  const handleDrawingEnd = useCallback(
+    (_event: NativeSyntheticEvent<{}>) => {
+      onDrawingEnd?.();
+    },
+    [onDrawingEnd]
+  );
+
   return (
     <RNZoomablePdfScrollView
       ref={viewRef}
@@ -306,6 +397,10 @@ export const NativeZoomablePdfScrollView = forwardRef<
       pdfBackgroundColor={
         backgroundColor ? processColor(backgroundColor) : undefined
       }
+      drawingMode={drawingMode}
+      strokeColor={drawingTool.color}
+      strokeWidth={drawingTool.strokeWidth}
+      strokeOpacity={drawingTool.opacity}
       onLayout={onLayout}
       onPdfError={handlePdfError}
       onPdfLoadComplete={handlePdfLoadComplete}
@@ -313,6 +408,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
       onZoomChange={handleZoomChange}
       onTap={handleTap}
       onMiddleClick={handleMiddleClick}
+      onDrawingStart={handleDrawingStart}
+      onDrawingEnd={handleDrawingEnd}
       style={style}
     />
   );
