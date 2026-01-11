@@ -130,6 +130,14 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
         realDrawingMode = mode
         drawingController.drawingMode = mode
 
+        // Disable page swiping in drawing modes
+        let isViewMode = mode == .view
+        for view in pageViewController?.view.subviews ?? [] {
+            if let scrollView = view as? UIScrollView {
+                scrollView.isScrollEnabled = isViewMode
+            }
+        }
+
         // Update current page view controller
         if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
             currentVC.updateDrawingMode(mode)
@@ -521,11 +529,12 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     }
 
     private let scrollView = UIScrollView()
+    private let contentContainer = UIView() // Container for imageView + drawingOverlay (zooms together)
     private let imageView = UIImageView()
 
-    private var doubleTapGesture: UITapGestureRecognizer!
-    private var edgeTapGesture: UITapGestureRecognizer!
-    private var middleTapGesture: UITapGestureRecognizer!
+    private var doubleTapGesture: UITapGestureRecognizer?
+    private var edgeTapGesture: UITapGestureRecognizer?
+    private var middleTapGesture: UITapGestureRecognizer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -543,34 +552,44 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         scrollView.backgroundColor = .clear
         view.addSubview(scrollView)
 
-        // Setup image view
+        // Setup content container (this is what gets zoomed)
+        contentContainer.backgroundColor = .clear
+        scrollView.addSubview(contentContainer)
+
+        // Setup image view inside container
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .white
-        scrollView.addSubview(imageView)
+        contentContainer.addSubview(imageView)
 
-        // Setup drawing overlay on top of image view
+        // Setup drawing overlay on top of image view (inside same container so it zooms together)
         drawingOverlay.pageIndex = pageIndex
         drawingOverlay.drawingController = drawingController
-        scrollView.addSubview(drawingOverlay)
+        contentContainer.addSubview(drawingOverlay)
 
         // Double tap to zoom (only works in middle zone)
-        doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
-        doubleTapGesture.numberOfTapsRequired = 2
-        doubleTapGesture.delegate = self
-        scrollView.addGestureRecognizer(doubleTapGesture)
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = self
+        scrollView.addGestureRecognizer(doubleTap)
+        doubleTapGesture = doubleTap
 
         // Edge tap - no delay (doesn't wait for double tap to fail)
-        edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
-        edgeTapGesture.numberOfTapsRequired = 1
-        edgeTapGesture.delegate = self
-        scrollView.addGestureRecognizer(edgeTapGesture)
+        let edgeTap = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
+        edgeTap.numberOfTapsRequired = 1
+        edgeTap.delegate = self
+        scrollView.addGestureRecognizer(edgeTap)
+        edgeTapGesture = edgeTap
 
         // Middle tap - waits for double tap to fail
-        middleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMiddleTap(_:)))
-        middleTapGesture.numberOfTapsRequired = 1
-        middleTapGesture.require(toFail: doubleTapGesture)
-        middleTapGesture.delegate = self
-        scrollView.addGestureRecognizer(middleTapGesture)
+        let middleTap = UITapGestureRecognizer(target: self, action: #selector(handleMiddleTap(_:)))
+        middleTap.numberOfTapsRequired = 1
+        middleTap.require(toFail: doubleTap)
+        middleTap.delegate = self
+        scrollView.addGestureRecognizer(middleTap)
+        middleTapGesture = middleTap
+
+        // Apply drawing mode that may have been set before view loaded
+        updateDrawingMode(currentDrawingMode)
     }
 
     override func viewDidLayoutSubviews() {
@@ -607,12 +626,15 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         let scale = viewSize.width / imageSize.width
         let scaledHeight = imageSize.height * scale
 
-        imageView.frame = CGRect(x: 0, y: 0, width: viewSize.width, height: scaledHeight)
-        scrollView.contentSize = imageView.frame.size
+        let contentFrame = CGRect(x: 0, y: 0, width: viewSize.width, height: scaledHeight)
 
-        // Update drawing overlay to match image view
-        drawingOverlay.frame = imageView.frame
-        drawingOverlay.contentRect = imageView.bounds
+        // Update container, image view, and drawing overlay frames
+        contentContainer.frame = contentFrame
+        imageView.frame = contentContainer.bounds
+        drawingOverlay.frame = contentContainer.bounds
+        drawingOverlay.contentRect = contentContainer.bounds
+
+        scrollView.contentSize = contentFrame.size
 
         updateContentInset()
     }
@@ -620,11 +642,14 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     func updateDrawingMode(_ mode: DrawingMode) {
         currentDrawingMode = mode
 
+        // Only update gestures if view is loaded
+        guard isViewLoaded else { return }
+
         // Disable all scroll/zoom gestures in drawing modes (draw, erase, highlight)
         let isViewMode = mode == .view
         scrollView.isScrollEnabled = isViewMode
         scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
-        doubleTapGesture.isEnabled = isViewMode
+        doubleTapGesture?.isEnabled = isViewMode
     }
 
     func redrawOverlay() {
@@ -666,6 +691,9 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     }
 
     @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
+        // Ignore edge taps in drawing modes
+        guard drawingController?.drawingMode == .view else { return }
+
         let tapLocation = gesture.location(in: view)
 
         let viewportHeight = view.bounds.height
@@ -716,7 +744,7 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     // MARK: - UIScrollViewDelegate
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-        return imageView
+        return contentContainer
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -738,9 +766,9 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
         let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
 
-        // Edge tap only in edge zones AND when not zoomed
+        // Edge tap only in edge zones AND when not zoomed AND in view mode
         if gestureRecognizer === edgeTapGesture {
-            return isInEdgeZone && isAtMinZoom
+            return isInEdgeZone && isAtMinZoom && drawingController?.drawingMode == .view
         }
 
         // Middle tap and double tap only in middle zone

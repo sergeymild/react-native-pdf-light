@@ -125,7 +125,7 @@ class DrawingController {
     func handleTouchEnded(page: Int) {
         guard drawingMode != .view else { return }
 
-        if isDrawing, let stroke = activeStroke, stroke.path.count > 1, stroke.page == page {
+        if isDrawing, let stroke = activeStroke, !stroke.path.isEmpty, stroke.page == page {
             finishStroke(page: page)
         }
 
@@ -223,14 +223,29 @@ class DrawingController {
         context.setLineJoin(.round)
 
         for stroke in strokes {
-            guard stroke.path.count > 1 else { continue }
-            drawSingleStroke(context: context, stroke: stroke, contentRect: contentRect, useNormalized: useNormalized, zoomScale: zoomScale)
+            guard !stroke.path.isEmpty else { continue }
+            if stroke.path.count == 1 {
+                // Draw a dot for single-point strokes
+                drawDot(context: context, stroke: stroke, contentRect: contentRect, useNormalized: useNormalized, zoomScale: zoomScale)
+            } else {
+                drawSingleStroke(context: context, stroke: stroke, contentRect: contentRect, useNormalized: useNormalized, zoomScale: zoomScale)
+            }
         }
     }
 
     /// Draw the active stroke being drawn
     func drawActiveStroke(in context: CGContext, page: Int, contentRect: CGRect, zoomScale: CGFloat = 1.0) {
-        guard let stroke = activeStroke, stroke.page == page, stroke.path.count > 1 else { return }
+        guard let stroke = activeStroke, stroke.page == page, !stroke.path.isEmpty else { return }
+
+        // Single point - draw a dot
+        if stroke.path.count == 1 {
+            let point = stroke.path[0]
+            let color = parseColor(strokeColor).withAlphaComponent(strokeOpacity)
+            let radius = strokeWidth / zoomScale / 2
+            context.setFillColor(color.cgColor)
+            context.fillEllipse(in: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+            return
+        }
 
         let color = parseColor(strokeColor).withAlphaComponent(strokeOpacity)
         context.setStrokeColor(color.cgColor)
@@ -241,11 +256,14 @@ class DrawingController {
         context.beginPath()
         context.move(to: stroke.path[0])
 
+        // For small strokes, don't skip any points
+        let minSkipDist: CGFloat = stroke.path.count < 10 ? 0 : 4
+
         var prevPoint = stroke.path[0]
         for i in 1..<stroke.path.count {
             let point = stroke.path[i]
             let dist = hypot(point.x - prevPoint.x, point.y - prevPoint.y)
-            if dist < 8 { continue }
+            if dist < minSkipDist { continue }
 
             let midPoint = CGPoint(x: (prevPoint.x + point.x) / 2, y: (prevPoint.y + point.y) / 2)
             context.addQuadCurve(to: midPoint, control: prevPoint)
@@ -254,6 +272,22 @@ class DrawingController {
 
         context.addLine(to: stroke.path.last!)
         context.strokePath()
+    }
+
+    private func drawDot(context: CGContext, stroke: DrawingStroke, contentRect: CGRect, useNormalized: Bool, zoomScale: CGFloat = 1.0) {
+        guard let firstPath = stroke.path.first, firstPath.count >= 2 else { return }
+
+        let point: CGPoint
+        if useNormalized {
+            point = normalizedToContent(firstPath, contentRect: contentRect)
+        } else {
+            point = CGPoint(x: firstPath[0], y: firstPath[1])
+        }
+
+        let color = parseColor(stroke.color).withAlphaComponent(stroke.opacity)
+        let radius = stroke.width / zoomScale / 2
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
     }
 
     private func drawSingleStroke(context: CGContext, stroke: DrawingStroke, contentRect: CGRect, useNormalized: Bool, zoomScale: CGFloat = 1.0) {
@@ -272,6 +306,9 @@ class DrawingController {
         var prevPoint = firstPoint
         context.move(to: prevPoint)
 
+        // For small strokes, don't skip any points
+        let minSkipDist: CGFloat = stroke.path.count < 10 ? 0 : 8
+
         for i in 1..<stroke.path.count {
             let point: CGPoint
             if useNormalized {
@@ -282,7 +319,7 @@ class DrawingController {
             }
 
             let dist = hypot(point.x - prevPoint.x, point.y - prevPoint.y)
-            if dist < 8 { continue }
+            if dist < minSkipDist { continue }
 
             let midPoint = CGPoint(x: (prevPoint.x + point.x) / 2, y: (prevPoint.y + point.y) / 2)
             context.addQuadCurve(to: midPoint, control: prevPoint)

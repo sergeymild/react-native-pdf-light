@@ -177,6 +177,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     }
 
     @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
+        // Ignore edge taps in drawing modes
+        guard drawingController.drawingMode == .view else { return }
+
         let tapLocation = gesture.location(in: self)
 
         let viewportHeight = bounds.height
@@ -698,9 +701,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
         let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
 
-        // Edge tap only in edge zones AND when not zoomed
+        // Edge tap only in edge zones AND when not zoomed AND in view mode
         if gestureRecognizer === edgeTapGesture {
-            return isInEdgeZone && scrollView.zoomScale <= minZoom + 0.01
+            return isInEdgeZone && scrollView.zoomScale <= minZoom + 0.01 && drawingController.drawingMode == .view
         }
 
         // Middle tap and double tap only in middle zone
