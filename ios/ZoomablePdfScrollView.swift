@@ -278,9 +278,11 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         scrollView.frame = bounds
 
-        // Clear cache if width changed (rotation)
+        // Clear cache and reset zoom if width changed (rotation)
         if bounds.width != previousBoundsWidth && previousBoundsWidth > 0 {
             imageCache.removeAllObjects()
+            // Reset zoom to 1.0 on rotation to avoid sizing issues
+            scrollView.zoomScale = 1.0
             collectionView.reloadData()
         }
         previousBoundsWidth = bounds.width
