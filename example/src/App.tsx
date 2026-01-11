@@ -155,7 +155,7 @@ export default function App() {
       </View>
 
       <PdfViewer
-        viewerType="paging"
+        viewerType="zoomable"
         ref={pdfViewRef}
         source={source}
         minZoom={1}

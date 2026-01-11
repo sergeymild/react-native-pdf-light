@@ -46,8 +46,10 @@ class DrawingOverlayView(context: Context) : View(context) {
 
         // Debug logging
         val activeStroke = controller.getActiveStroke()
-        Log.d("DrawingOverlay", "onDraw: multiPageMode=$multiPageMode, pageCount=$pageCount, pageHeight=$pageHeight, " +
-                "scrollOffset=$scrollOffset, width=$width, height=$height, activeStroke=${activeStroke != null}")
+        val strokeCount = controller.getStrokes(pageIndex).size
+        Log.d("DrawingOverlay", "onDraw: multiPageMode=$multiPageMode, pageIndex=$pageIndex, " +
+                "width=$width, height=$height, contentRect=$contentRect, zoomScale=$zoomScale, " +
+                "strokes=$strokeCount, activeStroke=${activeStroke != null}")
 
         if (multiPageMode) {
             drawMultiPage(canvas, controller)

@@ -644,8 +644,6 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         drawingOverlay = DrawingOverlayView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             setBackgroundColor(Color.TRANSPARENT)
-            // Use software layer to ensure proper redrawing
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
         }
 
         // Build view hierarchy: scrollView -> contentContainer -> [imageView, drawingOverlay]
@@ -987,6 +985,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
 
     private fun updateDrawingOverlay(parentWidth: Int, bitmap: Bitmap?) {
         if (bitmap == null || parentWidth <= 0) {
+            Log.d("ZoomablePageView", "updateDrawingOverlay: bitmap=$bitmap, parentWidth=$parentWidth - clearing contentRect")
             drawingOverlay.contentRect = android.graphics.RectF()
             return
         }
@@ -997,11 +996,21 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         val viewWidth = parentWidth.toFloat()
         val viewHeight = viewWidth * bitmapHeight / bitmapWidth
 
-        drawingOverlay.contentRect = android.graphics.RectF(0f, 0f, viewWidth, viewHeight)
+        val newRect = android.graphics.RectF(0f, 0f, viewWidth, viewHeight)
+        Log.d("ZoomablePageView", "updateDrawingOverlay: pageIndex=$pageIndex, parentWidth=$parentWidth, " +
+                "bitmap=${bitmapWidth}x${bitmapHeight}, contentRect=$newRect, " +
+                "controller=${drawingController != null}, strokes=${drawingController?.getStrokes(pageIndex)?.size ?: 0}")
+
+        drawingOverlay.contentRect = newRect
         drawingOverlay.drawingController = drawingController
         drawingOverlay.pageIndex = pageIndex
         drawingOverlay.zoomScale = scale
-        drawingOverlay.invalidate()
+
+        // Force layout and invalidate
+        drawingOverlay.post {
+            drawingOverlay.requestLayout()
+            drawingOverlay.invalidate()
+        }
     }
 
     private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, targetScrollY: Int = 0, duration: Long = 300L) {

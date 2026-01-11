@@ -113,8 +113,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             setBackgroundColor(Color.TRANSPARENT)
             drawingController = this@ZoomablePdfScrollView.drawingController
             multiPageMode = true
-            // Use software layer to ensure proper redrawing
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
         }
 
         addView(mRecyclerView)
