@@ -12,7 +12,11 @@ class PdfViewPackage : ReactPackage {
   }
 
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-    return listOf<NativeModule>(PdfUtilModule(reactContext, pdfMutex))
+    return listOf<NativeModule>(
+      PdfUtilModule(reactContext, pdfMutex),
+      PagingPdfViewModule(reactContext),
+      ZoomablePdfScrollViewModule(reactContext)
+    )
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

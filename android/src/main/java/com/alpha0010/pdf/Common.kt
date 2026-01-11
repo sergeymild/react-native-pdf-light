@@ -6,16 +6,323 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
+import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.WritableArray
+import com.facebook.react.bridge.WritableMap
 import org.json.JSONArray
+import java.util.UUID
 import java.util.concurrent.locks.Lock
 import kotlin.concurrent.withLock
+import kotlin.math.hypot
 
 const val SLICES = 4
 
 enum class ResizeMode(val jsName: String) {
   CONTAIN("contain"),
   FIT_WIDTH("fitWidth")
+}
+
+// --- Drawing Mode ---
+
+enum class DrawingMode(val jsName: String) {
+    VIEW("view"),
+    DRAW("draw"),
+    ERASE("erase"),
+    HIGHLIGHT("highlight");
+
+    companion object {
+        fun fromString(value: String): DrawingMode {
+            return entries.find { it.jsName == value } ?: VIEW
+        }
+    }
+}
+
+// --- Drawing Stroke ---
+
+data class DrawingStroke(
+    val id: String,
+    val color: String,
+    val width: Float,
+    val opacity: Float,
+    val path: MutableList<PointF>
+) {
+    fun toWritableMap(): WritableMap {
+        val map = Arguments.createMap()
+        map.putString("id", id)
+        map.putString("color", color)
+        map.putDouble("width", width.toDouble())
+        map.putDouble("opacity", opacity.toDouble())
+
+        val pathArray = Arguments.createArray()
+        for (point in path) {
+            val pointArray = Arguments.createArray()
+            pointArray.pushDouble(point.x.toDouble())
+            pointArray.pushDouble(point.y.toDouble())
+            pathArray.pushArray(pointArray)
+        }
+        map.putArray("path", pathArray)
+
+        return map
+    }
+}
+
+// --- Page Strokes Storage ---
+
+class PageStrokes {
+    private val strokes = mutableMapOf<Int, MutableList<DrawingStroke>>()
+
+    fun setStrokes(pageStrokes: List<DrawingStroke>, forPage: Int) {
+        strokes[forPage] = pageStrokes.toMutableList()
+    }
+
+    fun getStrokes(forPage: Int): List<DrawingStroke> {
+        return strokes[forPage] ?: emptyList()
+    }
+
+    fun addStroke(stroke: DrawingStroke, toPage: Int) {
+        val pageList = strokes.getOrPut(toPage) { mutableListOf() }
+        pageList.add(stroke)
+    }
+
+    fun removeStroke(withId: String, fromPage: Int): Boolean {
+        val pageList = strokes[fromPage] ?: return false
+        return pageList.removeAll { it.id == withId }
+    }
+
+    fun clearStrokes(forPage: Int) {
+        strokes.remove(forPage)
+    }
+
+    fun clearAllStrokes() {
+        strokes.clear()
+    }
+
+    fun getAllStrokes(): Map<Int, List<DrawingStroke>> {
+        return strokes.toMap()
+    }
+}
+
+// --- Drawing Controller ---
+
+interface DrawingControllerDelegate {
+    fun onDrawingStart()
+    fun onDrawingEnd()
+    fun onStrokeAdded(stroke: DrawingStroke, page: Int)
+    fun onStrokeRemoved(strokeId: String, page: Int)
+    fun onStrokesCleared(page: Int)
+    fun onNeedsRedraw()
+}
+
+class DrawingController {
+    var delegate: DrawingControllerDelegate? = null
+
+    var drawingMode: DrawingMode = DrawingMode.VIEW
+    var strokeColor: String = "#000000"
+    var strokeWidth: Float = 3f
+    var strokeOpacity: Float = 1f
+
+    private val pageStrokes = PageStrokes()
+    private var activeStroke: Pair<Int, MutableList<PointF>>? = null
+    var isDrawing: Boolean = false
+        private set
+
+    // Stroke management
+
+    fun setStrokes(strokes: List<DrawingStroke>, forPage: Int) {
+        pageStrokes.setStrokes(strokes, forPage)
+    }
+
+    fun getStrokes(forPage: Int): List<DrawingStroke> {
+        return pageStrokes.getStrokes(forPage)
+    }
+
+    fun clearStrokes(forPage: Int) {
+        pageStrokes.clearStrokes(forPage)
+        delegate?.onStrokesCleared(forPage)
+    }
+
+    fun clearAllStrokes() {
+        pageStrokes.clearAllStrokes()
+    }
+
+    // Touch handling
+
+    fun handleTouchBegan(point: PointF, page: Int, contentRect: RectF) {
+        if (drawingMode == DrawingMode.VIEW) return
+
+        if (drawingMode == DrawingMode.ERASE) {
+            eraseStroke(point, page, contentRect)
+        } else {
+            isDrawing = true
+            activeStroke = Pair(page, mutableListOf(point))
+            delegate?.onDrawingStart()
+            delegate?.onNeedsRedraw()
+        }
+    }
+
+    fun handleTouchMoved(point: PointF, page: Int, contentRect: RectF) {
+        if (drawingMode == DrawingMode.VIEW) return
+
+        if (drawingMode == DrawingMode.ERASE) {
+            eraseStroke(point, page, contentRect)
+        } else if (isDrawing) {
+            activeStroke?.let { (strokePage, path) ->
+                if (strokePage == page) {
+                    path.add(point)
+                    delegate?.onNeedsRedraw()
+                }
+            }
+        }
+    }
+
+    fun handleTouchEnded(page: Int) {
+        if (drawingMode == DrawingMode.VIEW) return
+
+        activeStroke?.let { (strokePage, path) ->
+            if (path.isNotEmpty() && strokePage == page) {
+                finishStroke(page)
+            }
+        }
+
+        isDrawing = false
+        activeStroke = null
+        delegate?.onDrawingEnd()
+        delegate?.onNeedsRedraw()
+    }
+
+    fun handleTouchCancelled() {
+        isDrawing = false
+        activeStroke = null
+        delegate?.onDrawingEnd()
+        delegate?.onNeedsRedraw()
+    }
+
+    private fun finishStroke(page: Int) {
+        val (_, path) = activeStroke ?: return
+
+        val width = if (drawingMode == DrawingMode.HIGHLIGHT) 20f else strokeWidth
+        val opacity = if (drawingMode == DrawingMode.HIGHLIGHT) 0.3f else strokeOpacity
+
+        val newStroke = DrawingStroke(
+            id = UUID.randomUUID().toString(),
+            color = strokeColor,
+            width = width,
+            opacity = opacity,
+            path = path.toMutableList()
+        )
+
+        pageStrokes.addStroke(newStroke, page)
+        delegate?.onStrokeAdded(newStroke, page)
+    }
+
+    private fun eraseStroke(point: PointF, page: Int, contentRect: RectF) {
+        val threshold = 0.03f // 3% of content size
+        val strokes = pageStrokes.getStrokes(page)
+
+        for (stroke in strokes.reversed()) {
+            for (strokePoint in stroke.path) {
+                val dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
+                if (dist < threshold) {
+                    if (pageStrokes.removeStroke(stroke.id, page)) {
+                        delegate?.onStrokeRemoved(stroke.id, page)
+                        delegate?.onNeedsRedraw()
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    // Get active stroke for drawing
+
+    fun getActiveStroke(): Pair<Int, List<PointF>>? {
+        return activeStroke?.let { Pair(it.first, it.second.toList()) }
+    }
+
+    // Export
+
+    fun getAnnotationsForExport(): WritableMap {
+        val result = Arguments.createMap()
+        val allStrokes = pageStrokes.getAllStrokes()
+
+        for ((page, strokes) in allStrokes) {
+            val strokesArray = Arguments.createArray()
+            for (stroke in strokes) {
+                val strokeMap = Arguments.createMap()
+                strokeMap.putString("id", stroke.id)
+                strokeMap.putString("color", stroke.color)
+                strokeMap.putDouble("width", stroke.width.toDouble())
+                strokeMap.putDouble("opacity", stroke.opacity.toDouble())
+
+                // Simplify and convert path
+                val simplifiedPath = simplifyPath(stroke.path)
+                val pathArray = Arguments.createArray()
+                for (point in simplifiedPath) {
+                    val pointArray = Arguments.createArray()
+                    pointArray.pushDouble(point.x.toDouble())
+                    pointArray.pushDouble(point.y.toDouble())
+                    pathArray.pushArray(pointArray)
+                }
+                strokeMap.putArray("path", pathArray)
+
+                strokesArray.pushMap(strokeMap)
+            }
+            result.putArray(page.toString(), strokesArray)
+        }
+
+        return result
+    }
+
+    // Path simplification using Ramer-Douglas-Peucker algorithm
+
+    private fun simplifyPath(path: List<PointF>, epsilon: Float = 0.002f): List<PointF> {
+        if (path.size <= 2) return path
+        return rdpSimplify(path, epsilon)
+    }
+
+    private fun rdpSimplify(points: List<PointF>, epsilon: Float): List<PointF> {
+        if (points.size <= 2) return points
+
+        var maxDistance = 0f
+        var maxIndex = 0
+
+        val first = points.first()
+        val last = points.last()
+
+        for (i in 1 until points.size - 1) {
+            val distance = perpendicularDistance(points[i], first, last)
+            if (distance > maxDistance) {
+                maxDistance = distance
+                maxIndex = i
+            }
+        }
+
+        return if (maxDistance > epsilon) {
+            val left = rdpSimplify(points.subList(0, maxIndex + 1), epsilon)
+            val right = rdpSimplify(points.subList(maxIndex, points.size), epsilon)
+            left.dropLast(1) + right
+        } else {
+            listOf(first, last)
+        }
+    }
+
+    private fun perpendicularDistance(point: PointF, lineStart: PointF, lineEnd: PointF): Float {
+        val dx = lineEnd.x - lineStart.x
+        val dy = lineEnd.y - lineStart.y
+
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared == 0f) {
+            return hypot(point.x - lineStart.x, point.y - lineStart.y)
+        }
+
+        val numerator = kotlin.math.abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x)
+        val denominator = kotlin.math.sqrt(lengthSquared)
+
+        return numerator / denominator
+    }
 }
 
 // --- Annotation Data Classes ---

@@ -59,6 +59,28 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
         }
     }
 
+    // --- Drawing props ---
+
+    @ReactProp(name = "drawingMode")
+    fun setDrawingMode(view: ZoomablePdfScrollView, mode: String?) {
+        view.setDrawingMode(mode ?: "view")
+    }
+
+    @ReactProp(name = "strokeColor")
+    fun setStrokeColor(view: ZoomablePdfScrollView, color: String?) {
+        view.setStrokeColor(color ?: "#000000")
+    }
+
+    @ReactProp(name = "strokeWidth")
+    fun setStrokeWidth(view: ZoomablePdfScrollView, width: Float) {
+        view.setStrokeWidth(width)
+    }
+
+    @ReactProp(name = "strokeOpacity")
+    fun setStrokeOpacity(view: ZoomablePdfScrollView, opacity: Float) {
+        view.setStrokeOpacity(opacity)
+    }
+
     override fun getExportedCustomBubblingEventTypeConstants(): Map<String, Any> {
         return MapBuilder.builder<String, Any>()
             .put("onPdfError", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPdfError")))
@@ -67,13 +89,16 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
             .put("onZoomChange", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onZoomChange")))
             .put("onTap", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onTap")))
             .put("onMiddleClick", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onMiddleClick")))
+            .put("onDrawingStart", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingStart")))
+            .put("onDrawingEnd", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingEnd")))
             .build()
     }
 
     override fun getCommandsMap(): Map<String, Int> {
         return MapBuilder.of(
             "resetZoom", COMMAND_RESET_ZOOM,
-            "scrollToPage", COMMAND_SCROLL_TO_PAGE
+            "scrollToPage", COMMAND_SCROLL_TO_PAGE,
+            "clearStrokes", COMMAND_CLEAR_STROKES
         )
     }
 
@@ -85,11 +110,20 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
                 val animated = args?.getBoolean(1) ?: true
                 view.scrollToPage(page, animated)
             }
+            "clearStrokes" -> {
+                val page = args?.getInt(0) ?: -1
+                view.clearStrokes(page)
+            }
         }
+    }
+
+    fun getAnnotations(view: ZoomablePdfScrollView): com.facebook.react.bridge.WritableMap {
+        return view.getAnnotations()
     }
 
     companion object {
         private const val COMMAND_RESET_ZOOM = 1
         private const val COMMAND_SCROLL_TO_PAGE = 2
+        private const val COMMAND_CLEAR_STROKES = 3
     }
 }

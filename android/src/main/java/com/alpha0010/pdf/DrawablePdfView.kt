@@ -31,26 +31,7 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
 
-/**
- * Drawing mode enum matching TypeScript DrawingMode
- */
-enum class DrawingMode(val jsName: String) {
-  VIEW("view"),
-  DRAW("draw"),
-  ERASE("erase"),
-  HIGHLIGHT("highlight")
-}
-
-/**
- * A stroke being drawn or already drawn.
- */
-data class DrawingStroke(
-  val id: String,
-  val color: String,
-  val width: Float,
-  val opacity: Float,
-  val path: MutableList<PointF>
-)
+// DrawingMode and DrawingStroke are now defined in Common.kt
 
 /**
  * PDF view with native drawing and zoom support.

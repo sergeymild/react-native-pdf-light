@@ -31,7 +31,7 @@ import kotlin.concurrent.withLock
  * Zoomable scrollable PDF viewer using RecyclerView for virtualization.
  */
 @SuppressLint("ViewConstructor")
-class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : FrameLayout(context) {
+class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : FrameLayout(context), DrawingControllerDelegate {
 
     // Props
     private var mSource = ""
@@ -43,6 +43,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     private var mPaddingTop = 0
     private var mPaddingBottom = 0
     private var mBackgroundColor = Color.DKGRAY
+
+    // Drawing controller
+    private val drawingController = DrawingController()
 
     // PDF state
     private var mPdfRenderer: PdfRenderer? = null
@@ -59,6 +62,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     // Views
     private val mRecyclerView: RecyclerView
     private val mAdapter: PdfPageAdapter
+    private val mDrawingOverlay: DrawingOverlayView
 
     // Image cache (LruCache with max 10MB or 10 pages)
     private val mImageCache: LruCache<Int, Bitmap>
@@ -82,6 +86,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     private var zoomAnimator: ValueAnimator? = null
 
     init {
+        drawingController.delegate = this
+
         // Initialize cache (10MB max)
         val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
         val cacheSize = maxMemory / 8 // Use 1/8th of available memory
@@ -101,7 +107,18 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mAdapter = PdfPageAdapter()
         mRecyclerView.adapter = mAdapter
 
+        // Drawing overlay (full screen, sits above RecyclerView)
+        mDrawingOverlay = DrawingOverlayView(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            setBackgroundColor(Color.TRANSPARENT)
+            drawingController = this@ZoomablePdfScrollView.drawingController
+            multiPageMode = true
+            // Use software layer to ensure proper redrawing
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+        }
+
         addView(mRecyclerView)
+        addView(mDrawingOverlay)
 
         // Setup scale gesture detector
         mScaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -255,10 +272,13 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             }
         })
 
-        // Scroll listener for page change tracking
+        // Scroll listener for page change tracking and drawing overlay sync
         mRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
+                // Update drawing overlay scroll offset
+                mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+                mDrawingOverlay.invalidate()
             }
         })
     }
@@ -282,6 +302,13 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.scaleY = mScale
         mRecyclerView.pivotX = 0f
         mRecyclerView.pivotY = 0f
+
+        // Don't apply scale to drawing overlay - it handles zoom internally through zoomScale
+        // This ensures proper invalidation during drawing
+        mDrawingOverlay.translationX = mOffsetX
+        mDrawingOverlay.zoomScale = mScale
+        mDrawingOverlay.invalidate()
+
         // Update padding to allow scrolling to see all zoomed content
         updateRecyclerViewPadding()
     }
@@ -294,6 +321,12 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Handle drawing mode
+        if (drawingController.drawingMode != DrawingMode.VIEW) {
+            handleDrawingTouch(event)
+            return true
+        }
+
         // Always process scale gestures
         mScaleDetector.onTouchEvent(event)
 
@@ -311,6 +344,58 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         }
 
         return true
+    }
+
+    private fun handleDrawingTouch(event: MotionEvent) {
+        // Calculate which page we're on and normalize coordinates
+        val pageHeightPx = getPageHeight()
+        if (pageHeightPx <= 0) {
+            Log.d("ZoomablePdf", "handleDrawingTouch: pageHeightPx <= 0, returning")
+            return
+        }
+
+        // Ensure overlay is set up before handling touch
+        if (mDrawingOverlay.pageCount == 0 || mDrawingOverlay.pageHeight <= 0f) {
+            Log.d("ZoomablePdf", "handleDrawingTouch: overlay not set up, calling updateDrawingOverlay")
+            updateDrawingOverlay()
+        }
+
+        val scrollOffset = mRecyclerView.computeVerticalScrollOffset()
+
+        // Convert screen coordinates to content coordinates (accounting for zoom and pan)
+        // Screen coord = content coord * scale + offset
+        // Content coord = (screen coord - offset) / scale
+        val contentX = (event.x - mOffsetX) / mScale
+        val contentY = event.y / mScale + scrollOffset
+
+        // Determine which page the touch is on
+        val pageIndex = (contentY / pageHeightPx).toInt().coerceIn(0, mActualPageCount - 1)
+
+        // Convert to normalized coordinates (0-1) within the page
+        val normalizedX = contentX / width
+        val normalizedY = (contentY - pageIndex * pageHeightPx) / pageHeightPx
+        val point = PointF(normalizedX.toFloat(), normalizedY.toFloat())
+
+        // Content rect is used by drawing overlay - in this case we use the pageRect from multiPageMode
+        val pageTop = pageIndex * pageHeightPx - scrollOffset
+        val contentRect = RectF(0f, pageTop.toFloat(), width.toFloat(), (pageTop + pageHeightPx).toFloat())
+
+        Log.d("ZoomablePdf", "handleDrawingTouch: action=${event.action}, point=($normalizedX, $normalizedY), " +
+                "pageIndex=$pageIndex, pageHeightPx=$pageHeightPx, scrollOffset=$scrollOffset")
+
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                Log.d("ZoomablePdf", "handleDrawingTouch: ACTION_DOWN")
+                drawingController.handleTouchBegan(point, pageIndex, contentRect)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                drawingController.handleTouchMoved(point, pageIndex, contentRect)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                Log.d("ZoomablePdf", "handleDrawingTouch: ACTION_UP/CANCEL")
+                drawingController.handleTouchEnded(pageIndex)
+            }
+        }
     }
 
     // --- Setters ---
@@ -355,6 +440,92 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     fun setPdfBackgroundColor(color: Int) {
         mBackgroundColor = color
         setBackgroundColor(color)
+    }
+
+    // --- Drawing setters ---
+
+    fun setDrawingMode(mode: String) {
+        drawingController.drawingMode = DrawingMode.fromString(mode)
+        // Update drawing overlay and ensure it's on top
+        updateDrawingOverlay()
+        mDrawingOverlay.bringToFront()
+    }
+
+    fun setStrokeColor(color: String) {
+        drawingController.strokeColor = color
+    }
+
+    fun setStrokeWidth(width: Float) {
+        drawingController.strokeWidth = width
+    }
+
+    fun setStrokeOpacity(opacity: Float) {
+        drawingController.strokeOpacity = opacity
+    }
+
+    fun clearStrokes(page: Int) {
+        if (page < 0) {
+            drawingController.clearAllStrokes()
+        } else {
+            drawingController.clearStrokes(page)
+        }
+        mDrawingOverlay.invalidate()
+    }
+
+    fun getAnnotations(): com.facebook.react.bridge.WritableMap {
+        return drawingController.getAnnotationsForExport()
+    }
+
+    private fun updateDrawingOverlay() {
+        val pageHeightPx = getPageHeight()
+        if (pageHeightPx <= 0) return
+
+        // Set up multi-page mode
+        mDrawingOverlay.pageCount = mActualPageCount
+        mDrawingOverlay.pageHeight = pageHeightPx.toFloat()
+        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        mDrawingOverlay.zoomScale = mScale
+        mDrawingOverlay.invalidate()
+    }
+
+    // --- DrawingControllerDelegate ---
+
+    override fun onDrawingStart() {
+        val event = Arguments.createMap()
+        val reactContext = context as ReactContext
+        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
+            id, "onDrawingStart", event
+        )
+    }
+
+    override fun onDrawingEnd() {
+        val event = Arguments.createMap()
+        val reactContext = context as ReactContext
+        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
+            id, "onDrawingEnd", event
+        )
+    }
+
+    override fun onStrokeAdded(stroke: DrawingStroke, page: Int) {
+        // Stroke added - redraw handled by onNeedsRedraw
+    }
+
+    override fun onStrokeRemoved(strokeId: String, page: Int) {
+        // Stroke removed - redraw handled by onNeedsRedraw
+    }
+
+    override fun onStrokesCleared(page: Int) {
+        // Strokes cleared - redraw handled by onNeedsRedraw
+    }
+
+    override fun onNeedsRedraw() {
+        // Update scroll offset and invalidate on UI thread
+        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        Log.d("ZoomablePdf", "onNeedsRedraw: invalidating overlay, scrollOffset=${mDrawingOverlay.scrollOffset}")
+        // Force immediate redraw by posting invalidation
+        mDrawingOverlay.post {
+            mDrawingOverlay.invalidate()
+        }
     }
 
     fun setPdfPaddingTop(padding: Float) {
@@ -418,6 +589,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
             mAdapter.notifyDataSetChanged()
 
+            // Update drawing overlay with new page info
+            updateDrawingOverlay()
+
             // Notify load complete
             onLoadComplete()
 
@@ -473,6 +647,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
             // Force re-bind all visible items
             mAdapter.notifyDataSetChanged()
+
+            // Update drawing overlay with new dimensions
+            updateDrawingOverlay()
         }
         mPreviousWidth = w
     }
@@ -588,6 +765,11 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     // MARK: - Single tap handling
 
     private fun handleEdgeTap(tapX: Float) {
+        // Ignore edge taps in drawing mode
+        if (drawingController.drawingMode != DrawingMode.VIEW) {
+            return
+        }
+
         val edgeRatio = mEdgeTapZone / 100f
         val leftEdge = width * edgeRatio
         val rightEdge = width * (1f - edgeRatio)
