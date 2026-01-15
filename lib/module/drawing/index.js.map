@@ -1,0 +1,1 @@
+{"version":3,"names":["DEFAULT_DRAWING_TOOL","DEFAULT_HIGHLIGHTER_TOOL"],"sources":["index.ts"],"sourcesContent":["export {\n  DEFAULT_DRAWING_TOOL,\n  DEFAULT_HIGHLIGHTER_TOOL,\n} from './types';\n\nexport type {\n  DrawingMode,\n  DrawingStroke,\n  DrawingTool,\n  PageAnnotations,\n} from './types';"],"mappings":"AAAA,SACEA,oBAAoB,EACpBC,wBAAwB,QACnB,SAAS","ignoreList":[]}

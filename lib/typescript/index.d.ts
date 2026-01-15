@@ -1,0 +1,2 @@
+export { NativeZoomablePdfScrollView, NativeZoomablePdfScrollViewProps_Public as NativeZoomablePdfScrollViewProps, NativeZoomablePdfScrollViewRef, ZoomablePdfErrorEvent, ZoomablePdfLoadCompleteEvent, ZoomablePdfPageChangeEvent, ZoomablePdfZoomChangeEvent, ZoomablePdfTapEvent, } from './NativeZoomablePdfScrollView';
+export { PdfViewer, type PdfViewerProps, type PdfViewerRef, type PdfErrorEvent, type PdfLoadCompleteEvent, } from './PdfViewer';
