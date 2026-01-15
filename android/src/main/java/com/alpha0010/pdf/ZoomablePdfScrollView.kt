@@ -135,11 +135,13 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     val focusY = detector.focusY
 
                     // Calculate the point in content coordinates before scale
-                    // Account for current scroll offset and horizontal pan
+                    // Screen Y = (contentY - scrollOffset) * scale
+                    // contentY = screenY / scale + scrollOffset
                     val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
                     val contentX = (focusX - mOffsetX) / mScale
-                    val contentY = (focusY + currentScrollY) / mScale
+                    val contentY = focusY / mScale + currentScrollY
 
+                    val oldScale = mScale
                     // Update scale
                     mScale = newScale
 
@@ -147,7 +149,14 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     mOffsetX = focusX - contentX * mScale
 
                     // Calculate new scroll position to keep vertical focus point stationary
-                    val newScrollY = (contentY * mScale - focusY).toInt().coerceAtLeast(0)
+                    // We want: focusY = (contentY - newScrollY) * newScale
+                    // So: newScrollY = contentY - focusY / newScale
+                    val newScrollY = (contentY - focusY / mScale).toInt().coerceAtLeast(0)
+
+                    Log.d("DRAW_DEBUG", "=== ZOOM ===")
+                    Log.d("DRAW_DEBUG", "scale: $oldScale -> $newScale, focus=($focusX, $focusY)")
+                    Log.d("DRAW_DEBUG", "content=($contentX, $contentY), mOffsetX=$mOffsetX")
+                    Log.d("DRAW_DEBUG", "scroll: $currentScrollY -> $newScrollY (delta=${newScrollY - currentScrollY})")
 
                     constrainOffset()
                     applyTransform()
@@ -301,10 +310,13 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.pivotX = 0f
         mRecyclerView.pivotY = 0f
 
-        // Don't apply scale to drawing overlay - it handles zoom internally through zoomScale
-        // This ensures proper invalidation during drawing
-        mDrawingOverlay.translationX = mOffsetX
+        // Don't apply scale or translationX to drawing overlay - it handles zoom internally
+        // We pass offsetX so the overlay can account for horizontal panning in its coordinate calculations
+        // Note: we do NOT set translationX on overlay because mOffsetX is calculated for the scaled RecyclerView
         mDrawingOverlay.zoomScale = mScale
+        mDrawingOverlay.offsetX = mOffsetX
+        // Always sync scrollOffset with zoomScale to prevent desync during zoom gestures
+        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
         mDrawingOverlay.invalidate()
 
         // Update padding to allow scrolling to see all zoomed content
@@ -378,8 +390,10 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         val pageTop = pageIndex * pageHeightPx - scrollOffset
         val contentRect = RectF(0f, pageTop.toFloat(), width.toFloat(), (pageTop + pageHeightPx).toFloat())
 
-        Log.d("ZoomablePdf", "handleDrawingTouch: action=${event.action}, point=($normalizedX, $normalizedY), " +
-                "pageIndex=$pageIndex, pageHeightPx=$pageHeightPx, scrollOffset=$scrollOffset")
+        Log.d("DRAW_DEBUG", "=== TOUCH INPUT ===")
+        Log.d("DRAW_DEBUG", "screen=(${event.x}, ${event.y}), mScale=$mScale, mOffsetX=$mOffsetX, scrollOffset=$scrollOffset")
+        Log.d("DRAW_DEBUG", "content=($contentX, $contentY), normalized=($normalizedX, $normalizedY), page=$pageIndex")
+        Log.d("DRAW_DEBUG", "width=$width, pageHeightPx=$pageHeightPx")
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {

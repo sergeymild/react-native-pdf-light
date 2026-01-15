@@ -1,0 +1,1 @@
+{"version":3,"names":["_types","require"],"sources":["index.ts"],"sourcesContent":["export {\n  DEFAULT_DRAWING_TOOL,\n  DEFAULT_HIGHLIGHTER_TOOL,\n} from './types';\n\nexport type {\n  DrawingMode,\n  DrawingStroke,\n  DrawingTool,\n  PageAnnotations,\n} from './types';"],"mappings":";;;;;;;;;;;;;;;;;AAAA,IAAAA,MAAA,GAAAC,OAAA","ignoreList":[]}

@@ -21,6 +21,9 @@ class DrawingOverlayView(context: Context) : View(context) {
     var contentRect: RectF = RectF()
     var zoomScale: Float = 1f
 
+    // Horizontal offset for zoom panning (in screen coordinates)
+    var offsetX: Float = 0f
+
     // Multi-page mode for ZoomablePdfScrollView
     var multiPageMode: Boolean = false
     var pageCount: Int = 0
@@ -108,16 +111,31 @@ class DrawingOverlayView(context: Context) : View(context) {
         val firstVisiblePage = ((scrollOffset / pageHeight).toInt()).coerceAtLeast(0)
         val lastVisiblePage = (((scrollOffset + viewHeight / zoomScale) / pageHeight).toInt() + 1).coerceAtMost(pageCount - 1)
 
-        Log.d("DrawingOverlay", "drawMultiPage: firstVisiblePage=$firstVisiblePage, lastVisiblePage=$lastVisiblePage, zoomScale=$zoomScale")
+        Log.d("DRAW_DEBUG", "=== RENDER ===")
+        Log.d("DRAW_DEBUG", "zoomScale=$zoomScale, scrollOffset=$scrollOffset, scaledScrollOffset=$scaledScrollOffset, offsetX=$offsetX")
+        Log.d("DRAW_DEBUG", "pageHeight=$pageHeight, scaledPageHeight=$scaledPageHeight, scaledWidth=$scaledWidth")
+        Log.d("DRAW_DEBUG", "viewWidth=$width, viewHeight=$height")
 
         // Draw strokes for each visible page
         for (page in firstVisiblePage..lastVisiblePage) {
             // Page position in scaled coordinates
+            // offsetX is the horizontal pan offset - we add it to pageRect so strokes align with PDF content
             val pageTop = page * scaledPageHeight - scaledScrollOffset
-            val pageRect = RectF(0f, pageTop, scaledWidth, pageTop + scaledPageHeight)
+            val pageRect = RectF(offsetX, pageTop, offsetX + scaledWidth, pageTop + scaledPageHeight)
 
             // Draw completed strokes
             val strokes = controller.getStrokes(page)
+            if (strokes.isNotEmpty()) {
+                Log.d("DRAW_DEBUG", "Page $page: pageTop=$pageTop, pageRect=$pageRect, strokes=${strokes.size}")
+                // Log first stroke's first point conversion
+                val firstStroke = strokes.first()
+                if (firstStroke.path.isNotEmpty()) {
+                    val pt = firstStroke.path.first()
+                    val screenX = pageRect.left + pt.x * pageRect.width()
+                    val screenY = pageRect.top + pt.y * pageRect.height()
+                    Log.d("DRAW_DEBUG", "First stroke point: normalized=(${pt.x}, ${pt.y}) -> screen=($screenX, $screenY)")
+                }
+            }
             for (stroke in strokes) {
                 if (stroke.path.isEmpty()) continue
 
