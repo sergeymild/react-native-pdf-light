@@ -195,8 +195,10 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 }
 
                 if (mScale > mMinScale) {
-                    // Reset zoom with animation (pivot back to 0)
-                    animateZoomTo(mMinScale, 0f, 0, 0f)
+                    // Reset zoom with animation
+                    // Set pivot to tap point and keep it during animation
+                    mPivotY = tapY
+                    animateZoomTo(mMinScale, 0f, 0, tapY)
                 } else {
                     // Zoom to maxZoom at tap location with animation
                     val targetScale = mMaxScale
@@ -212,7 +214,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
 
-                    // Use tap point as pivot for zoom
+                    // Set pivot to tap point and keep it during animation
+                    mPivotY = tapY
                     animateZoomTo(targetScale, targetOffsetX, 0, tapY)
                 }
 

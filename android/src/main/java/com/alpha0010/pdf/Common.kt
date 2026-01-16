@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import java.util.concurrent.locks.Lock
 import kotlin.concurrent.withLock
+import androidx.core.graphics.createBitmap
 
 const val SLICES = 4
 
@@ -42,7 +43,7 @@ object PdfPageRenderer {
         return pdfMutex.withLock {
             try {
                 val page = renderer.openPage(pageIndex)
-                val bitmap = Bitmap.createBitmap(viewWidth, pageHeight, Bitmap.Config.ARGB_8888)
+                val bitmap = createBitmap(viewWidth, pageHeight)
                 bitmap.eraseColor(Color.WHITE)
 
                 val matrix = Matrix()
