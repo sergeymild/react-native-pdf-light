@@ -216,9 +216,19 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     }
 
     private fun closePdf() {
-        mPdfRenderer?.close()
-        mPdfRenderer = null
-        mFileDescriptor?.close()
+        pdfMutex.withLock {
+            try {
+                mPdfRenderer?.close()
+            } catch (e: Exception) {
+                // Ignore errors during cleanup (e.g., page still open from cancelled render)
+            }
+            mPdfRenderer = null
+        }
+        try {
+            mFileDescriptor?.close()
+        } catch (e: Exception) {
+            // Ignore errors during cleanup
+        }
         mFileDescriptor = null
     }
 
