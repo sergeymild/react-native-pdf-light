@@ -387,12 +387,12 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
         }
 
         override fun onBindViewHolder(holder: PdfPageViewHolder, position: Int) {
-            // IMPORTANT: Disable recycling to prevent ViewPager2 issues
-            holder.setIsRecyclable(false)
-
             val viewWidth = this@PagingPdfView.width
 
             if (viewWidth <= 0 || mPdfPageWidth <= 0 || mPdfPageHeight <= 0) return
+
+            // Reset state for recycled views
+            holder.pageView.resetState()
 
             holder.pageView.minZoom = mMinScale
             holder.pageView.maxZoom = mMaxScale
@@ -809,6 +809,23 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     fun resetZoom() {
         animateZoomTo(minZoom, 0f)
         scrollView.smoothScrollTo(0, 0)
+    }
+
+    fun resetState() {
+        // Cancel any running animation
+        zoomAnimator?.cancel()
+        // Reset zoom and scroll state
+        scale = minZoom
+        offsetX = 0f
+        pivotY = 0f
+        shouldScrollToBottomOnLoad = false
+        applyTransform()
+        updateScrollViewPadding()
+        scrollView.scrollTo(0, 0)
+        scrollView.alpha = 1f
+        // Clear callbacks to prevent stale references
+        onPreviousPage = null
+        onNextPage = null
     }
 
     fun setPageBackgroundColor(color: Int) {
