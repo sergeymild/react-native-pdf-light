@@ -1,6 +1,6 @@
 {
   "name": "react-native-pdf-light",
-  "version": "1.0.4",
+  "version": "1.0.7",
   "description": "Minimalist PDF viewer for React Native",
   "main": "src/index.ts",
   "module": "src/index.ts",
@@ -25,6 +25,7 @@
     "test": "jest",
     "typescript": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "build_bob": "bob build",
     "release": "release-it",
     "example": "yarn --cwd example",
     "pods": "cd example && pod-install --quiet",

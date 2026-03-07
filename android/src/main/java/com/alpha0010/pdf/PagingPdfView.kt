@@ -318,9 +318,19 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     }
 
     private fun closePdf() {
-        mPdfRenderer?.close()
-        mPdfRenderer = null
-        mFileDescriptor?.close()
+        pdfMutex.withLock {
+            try {
+                mPdfRenderer?.close()
+            } catch (e: Exception) {
+                // Ignore errors during cleanup (e.g., page still open from cancelled render)
+            }
+            mPdfRenderer = null
+        }
+        try {
+            mFileDescriptor?.close()
+        } catch (e: Exception) {
+            // Ignore errors during cleanup
+        }
         mFileDescriptor = null
     }
 
@@ -481,12 +491,12 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
         }
 
         override fun onBindViewHolder(holder: PdfPageViewHolder, position: Int) {
-            // IMPORTANT: Disable recycling to prevent ViewPager2 issues
-            holder.setIsRecyclable(false)
-
             val viewWidth = this@PagingPdfView.width
 
             if (viewWidth <= 0 || mPdfPageWidth <= 0 || mPdfPageHeight <= 0) return
+
+            // Reset state for recycled views
+            holder.pageView.resetState()
 
             holder.pageView.minZoom = mMinScale
             holder.pageView.maxZoom = mMaxScale
@@ -606,6 +616,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
 
     private var scale = 1f
     private var offsetX = 0f  // Horizontal pan offset when zoomed
+    private var pivotY = 0f   // Vertical pivot point for zoom
     private var bgColor = Color.WHITE
 
     private val scaleDetector: ScaleGestureDetector
@@ -665,26 +676,19 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     val focusX = detector.focusX
                     val focusY = detector.focusY
 
-                    // Calculate the point in content coordinates before scale
+                    // Calculate the point in content coordinates before scale (horizontal only)
                     val contentX = (focusX - offsetX) / scale
-                    val contentY = (focusY + scrollView.scrollY) / scale
 
-                    // Update scale
-                    val oldScale = scale
+                    // Update scale and pivot
                     scale = newScale
+                    pivotY = focusY
 
                     // Calculate new horizontal offset to keep focus point stationary
                     offsetX = focusX - contentX * scale
 
-                    // Calculate new scroll position to keep vertical focus point stationary
-                    val newScrollY = (contentY * scale - focusY).toInt().coerceAtLeast(0)
-
                     constrainOffset()
                     applyTransform()
                     updateScrollViewPadding()
-
-                    // Update scroll position
-                    scrollView.scrollTo(0, newScrollY)
 
                     onZoomChange?.invoke(scale)
                     onZoomStateChange?.invoke(isZoomed)
@@ -760,16 +764,15 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 }
 
                 if (isZoomed) {
-                    // Zoom out with animation
-                    animateZoomTo(minZoom, 0f, 0)
+                    // Zoom out with animation - set pivot to tap point first
+                    pivotY = tapY
+                    animateZoomTo(minZoom, 0f, tapY)
                 } else {
                     // Zoom in with animation to tap point - use maxZoom for full zoom
                     val targetScale = maxZoom
 
-                    // Calculate content point under tap in content coordinates
-                    // tapY is screen coordinate, need to convert to content coordinate
+                    // Calculate content point under tap in content coordinates (horizontal only)
                     val contentX = (tapX - offsetX) / scale
-                    val contentY = tapY / scale + scrollView.scrollY
 
                     // Calculate new horizontal offset to keep tap point stationary
                     var targetOffsetX = tapX - contentX * targetScale
@@ -780,13 +783,9 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), maxOffsetX)
 
-                    // Calculate target scroll to keep tap point at same screen position
-                    // After zoom: screenY = (contentY - scrollY) * scale, we want screenY = tapY
-                    // So: tapY = (contentY - targetScrollY) * targetScale
-                    // targetScrollY = contentY - tapY / targetScale
-                    val targetScrollY = (contentY - tapY / targetScale).toInt().coerceAtLeast(0)
-
-                    animateZoomTo(targetScale, targetOffsetX, targetScrollY)
+                    // Set pivot to tap point and animate zoom
+                    pivotY = tapY
+                    animateZoomTo(targetScale, targetOffsetX, tapY)
                 }
                 return true
             }
@@ -927,6 +926,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         // Reset zoom when setting new image
         scale = minZoom
         offsetX = 0f
+        pivotY = 0f
         applyTransform()
         updateScrollViewPadding()
         updateDrawingOverlay(parentWidth, bitmap)
@@ -1013,12 +1013,12 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, targetScrollY: Int = 0, duration: Long = 300L) {
+    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, targetPivotY: Float = pivotY, duration: Long = 300L) {
         zoomAnimator?.cancel()
 
         val startScale = scale
         val startOffsetX = offsetX
-        val startScrollY = scrollView.scrollY
+        val startPivotY = pivotY
 
         zoomAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
@@ -1027,10 +1027,9 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 val fraction = animator.animatedValue as Float
                 scale = startScale + (targetScale - startScale) * fraction
                 offsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
-                val newScrollY = startScrollY + ((targetScrollY - startScrollY) * fraction).toInt()
+                pivotY = startPivotY + (targetPivotY - startPivotY) * fraction
                 applyTransform()
                 updateScrollViewPadding()
-                scrollView.scrollTo(0, newScrollY)
                 onZoomChange?.invoke(scale)
                 onZoomStateChange?.invoke(isZoomed)
             }
@@ -1041,6 +1040,23 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     fun resetZoom() {
         animateZoomTo(minZoom, 0f)
         scrollView.smoothScrollTo(0, 0)
+    }
+
+    fun resetState() {
+        // Cancel any running animation
+        zoomAnimator?.cancel()
+        // Reset zoom and scroll state
+        scale = minZoom
+        offsetX = 0f
+        pivotY = 0f
+        shouldScrollToBottomOnLoad = false
+        applyTransform()
+        updateScrollViewPadding()
+        scrollView.scrollTo(0, 0)
+        scrollView.alpha = 1f
+        // Clear callbacks to prevent stale references
+        onPreviousPage = null
+        onNextPage = null
     }
 
     fun setPageBackgroundColor(color: Int) {

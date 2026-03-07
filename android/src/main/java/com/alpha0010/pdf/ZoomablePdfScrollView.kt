@@ -58,6 +58,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     private var mScale = 1f
     private var mOffsetX = 0f
     private var mOffsetY = 0f
+    private var mPivotY = 0f
 
     // Views
     private val mRecyclerView: RecyclerView
@@ -135,8 +136,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     val focusY = detector.focusY
 
                     // Calculate the point in content coordinates before scale
-                    // Screen Y = (contentY - scrollOffset) * scale
-                    // contentY = screenY / scale + scrollOffset
                     val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
                     val contentX = (focusX - mOffsetX) / mScale
                     val contentY = focusY / mScale + currentScrollY
@@ -144,28 +143,17 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     val oldScale = mScale
                     // Update scale
                     mScale = newScale
+                    mPivotY = focusY
 
                     // Calculate new horizontal offset to keep focus point stationary
                     mOffsetX = focusX - contentX * mScale
 
                     // Calculate new scroll position to keep vertical focus point stationary
-                    // We want: focusY = (contentY - newScrollY) * newScale
-                    // So: newScrollY = contentY - focusY / newScale
                     val newScrollY = (contentY - focusY / mScale).toInt().coerceAtLeast(0)
 
-                    Log.d("DRAW_DEBUG", "=== ZOOM ===")
-                    Log.d("DRAW_DEBUG", "scale: $oldScale -> $newScale, focus=($focusX, $focusY)")
-                    Log.d("DRAW_DEBUG", "content=($contentX, $contentY), mOffsetX=$mOffsetX")
-                    Log.d("DRAW_DEBUG", "scroll: $currentScrollY -> $newScrollY (delta=${newScrollY - currentScrollY})")
 
                     constrainOffset()
                     applyTransform()
-
-                    // Update scroll position to keep focus point in place
-                    val scrollDelta = newScrollY - currentScrollY
-                    if (scrollDelta != 0) {
-                        mRecyclerView.scrollBy(0, scrollDelta)
-                    }
 
                     onZoomChange()
                 }
@@ -232,7 +220,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
                 if (mScale > mMinScale) {
                     // Reset zoom with animation
-                    animateZoomTo(mMinScale, 0f, 0)
+                    // Set pivot to tap point and keep it during animation
+                    mPivotY = tapY
+                    animateZoomTo(mMinScale, 0f, 0, tapY)
                 } else {
                     // Zoom to maxZoom at tap location with animation
                     val targetScale = mMaxScale
@@ -248,18 +238,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
 
-                    // Calculate vertical scroll adjustment
-                    // tapY is screen coordinate, need to convert to content coordinate
-                    val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
-                    val contentY = tapY / mScale + currentScrollY
-
-                    // Calculate target scroll to keep tap point at same screen position
-                    // After zoom: screenY = (contentY - scrollY) * scale, we want screenY = tapY
-                    // targetScrollY = contentY - tapY / targetScale
-                    val targetScrollY = (contentY - tapY / targetScale).toInt().coerceAtLeast(0)
-                    val scrollDelta = targetScrollY - currentScrollY
-
-                    animateZoomTo(targetScale, targetOffsetX, scrollDelta)
+                    // Set pivot to tap point and keep it during animation
+                    mPivotY = tapY
+                    animateZoomTo(targetScale, targetOffsetX, 0, tapY)
                 }
 
                 return true
@@ -311,11 +292,8 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.pivotY = 0f
 
         // Don't apply scale or translationX to drawing overlay - it handles zoom internally
-        // We pass offsetX so the overlay can account for horizontal panning in its coordinate calculations
-        // Note: we do NOT set translationX on overlay because mOffsetX is calculated for the scaled RecyclerView
         mDrawingOverlay.zoomScale = mScale
         mDrawingOverlay.offsetX = mOffsetX
-        // Always sync scrollOffset with zoomScale to prevent desync during zoom gestures
         mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
         mDrawingOverlay.invalidate()
 
@@ -615,9 +593,19 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     }
 
     private fun closePdf() {
-        mPdfRenderer?.close()
-        mPdfRenderer = null
-        mFileDescriptor?.close()
+        pdfMutex.withLock {
+            try {
+                mPdfRenderer?.close()
+            } catch (e: Exception) {
+                // Ignore errors during cleanup (e.g., page still open from cancelled render)
+            }
+            mPdfRenderer = null
+        }
+        try {
+            mFileDescriptor?.close()
+        } catch (e: Exception) {
+            // Ignore errors during cleanup
+        }
         mFileDescriptor = null
     }
 
@@ -655,6 +643,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             mScale = mMinScale
             mOffsetX = 0f
             mOffsetY = 0f
+            mPivotY = 0f
             applyTransform()
 
             // Force re-bind all visible items
@@ -668,11 +657,12 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     // --- Zoom animation ---
 
-    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, scrollDelta: Int = 0, duration: Long = 300L) {
+    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, scrollDelta: Int = 0, targetPivotY: Float = 0f, duration: Long = 300L) {
         zoomAnimator?.cancel()
 
         val startScale = mScale
         val startOffsetX = mOffsetX
+        val startPivotY = mPivotY
         var accumulatedScroll = 0
 
         zoomAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -682,6 +672,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 val fraction = animator.animatedValue as Float
                 mScale = startScale + (targetScale - startScale) * fraction
                 mOffsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
+                mPivotY = startPivotY + (targetPivotY - startPivotY) * fraction
 
                 // Animate scroll
                 if (scrollDelta != 0) {
