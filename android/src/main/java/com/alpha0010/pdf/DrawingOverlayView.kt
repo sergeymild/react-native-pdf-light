@@ -24,6 +24,9 @@ class DrawingOverlayView(context: Context) : View(context) {
     // Horizontal offset for zoom panning (in screen coordinates)
     var offsetX: Float = 0f
 
+    // RecyclerView paddingTop (needed to align overlay with RV content in multi-page mode)
+    var recyclerPaddingTop: Float = 0f
+
     // Multi-page mode for ZoomablePdfScrollView
     var multiPageMode: Boolean = false
     var pageCount: Int = 0
@@ -105,6 +108,7 @@ class DrawingOverlayView(context: Context) : View(context) {
         val scaledPageHeight = pageHeight * zoomScale
         val scaledWidth = width * zoomScale
         val scaledScrollOffset = scrollOffset * zoomScale
+        val scaledPaddingTop = recyclerPaddingTop * zoomScale
 
         // Calculate which pages are visible (using unscaled values for calculation)
         val viewHeight = height.toFloat()
@@ -119,8 +123,9 @@ class DrawingOverlayView(context: Context) : View(context) {
         // Draw strokes for each visible page
         for (page in firstVisiblePage..lastVisiblePage) {
             // Page position in scaled coordinates
+            // scaledPaddingTop accounts for RecyclerView padding that shifts content down
             // offsetX is the horizontal pan offset - we add it to pageRect so strokes align with PDF content
-            val pageTop = page * scaledPageHeight - scaledScrollOffset
+            val pageTop = scaledPaddingTop + page * scaledPageHeight - scaledScrollOffset
             val pageRect = RectF(offsetX, pageTop, offsetX + scaledWidth, pageTop + scaledPageHeight)
 
             // Draw completed strokes

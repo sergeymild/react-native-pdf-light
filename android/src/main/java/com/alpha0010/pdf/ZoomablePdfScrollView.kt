@@ -137,10 +137,10 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
                     // Calculate the point in content coordinates before scale
                     val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
+                    val oldPaddingTop = mRecyclerView.paddingTop
                     val contentX = (focusX - mOffsetX) / mScale
-                    val contentY = focusY / mScale + currentScrollY
+                    val contentY = focusY / mScale - oldPaddingTop + currentScrollY
 
-                    val oldScale = mScale
                     // Update scale
                     mScale = newScale
                     mPivotY = focusY
@@ -148,9 +148,18 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                     // Calculate new horizontal offset to keep focus point stationary
                     mOffsetX = focusX - contentX * mScale
 
-                    // Calculate new scroll position to keep vertical focus point stationary
-                    val newScrollY = (contentY - focusY / mScale).toInt().coerceAtLeast(0)
+                    // Calculate what the new paddingTop will be after applyTransform
+                    val newZoomExtraTop = if (mScale > 1.01f && height > 0) {
+                        (height * (mScale - 1) * 0.05f).toInt()
+                    } else 0
+                    val newPaddingTop = mPaddingTop + newZoomExtraTop
 
+                    // Adjust scroll to keep vertical focus point stationary
+                    val newScrollY = (contentY - focusY / mScale + newPaddingTop).toInt().coerceAtLeast(0)
+                    val scrollDelta = newScrollY - currentScrollY
+                    if (scrollDelta != 0) {
+                        mRecyclerView.scrollBy(0, scrollDelta)
+                    }
 
                     constrainOffset()
                     applyTransform()
@@ -264,8 +273,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
-                // Update drawing overlay scroll offset
+                // Update drawing overlay scroll offset and padding
                 mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+                mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
                 mDrawingOverlay.invalidate()
             }
         })
@@ -295,6 +305,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mDrawingOverlay.zoomScale = mScale
         mDrawingOverlay.offsetX = mOffsetX
         mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
         mDrawingOverlay.invalidate()
 
         // Update padding to allow scrolling to see all zoomed content
@@ -349,12 +360,14 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         }
 
         val scrollOffset = mRecyclerView.computeVerticalScrollOffset()
+        val paddingTop = mRecyclerView.paddingTop
 
-        // Convert screen coordinates to content coordinates (accounting for zoom and pan)
-        // Screen coord = content coord * scale + offset
-        // Content coord = (screen coord - offset) / scale
+        // Convert screen coordinates to content coordinates (accounting for zoom, pan, and padding)
+        // RV page positions: paddingTop + page * pageHeight (in RV local space)
+        // RV local y = screen_y / scale (pivotY=0)
+        // Content y = rv_local_y - paddingTop + scrollOffset
         val contentX = (event.x - mOffsetX) / mScale
-        val contentY = event.y / mScale + scrollOffset
+        val contentY = event.y / mScale - paddingTop + scrollOffset
 
         // Determine which page the touch is on
         val pageIndex = (contentY / pageHeightPx).toInt().coerceIn(0, mActualPageCount - 1)
@@ -474,6 +487,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mDrawingOverlay.pageCount = mActualPageCount
         mDrawingOverlay.pageHeight = pageHeightPx.toFloat()
         mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
         mDrawingOverlay.zoomScale = mScale
         mDrawingOverlay.invalidate()
     }

@@ -676,8 +676,9 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     val focusX = detector.focusX
                     val focusY = detector.focusY
 
-                    // Calculate the point in content coordinates before scale (horizontal only)
+                    // Calculate the point in content coordinates before scale
                     val contentX = (focusX - offsetX) / scale
+                    val contentY = focusY / scale + scrollView.scrollY
 
                     // Update scale and pivot
                     scale = newScale
@@ -685,6 +686,10 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
 
                     // Calculate new horizontal offset to keep focus point stationary
                     offsetX = focusX - contentX * scale
+
+                    // Adjust scroll to keep vertical focus point stationary
+                    val newScrollY = (contentY - focusY / scale).toInt().coerceAtLeast(0)
+                    scrollView.scrollTo(0, newScrollY)
 
                     constrainOffset()
                     applyTransform()
