@@ -14,8 +14,8 @@ import {
   UIManager,
   ViewStyle,
 } from 'react-native';
-import type { DrawingMode, DrawingTool } from './drawing/types';
-import { DEFAULT_DRAWING_TOOL } from './drawing/types';
+import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
+import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -75,6 +75,10 @@ type NativeZoomablePdfScrollViewProps = {
   strokeColor: string;
   strokeWidth: number;
   strokeOpacity: number;
+
+  // Text annotation props
+  textColor: string;
+  textFontSize: number;
 
   onLayout?: (event: LayoutChangeEvent) => void;
   onPdfError: (event: NativeSyntheticEvent<ZoomablePdfErrorEvent>) => void;
@@ -152,6 +156,7 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    * - 'draw': Drawing mode with current tool (zoom disabled)
    * - 'erase': Erase strokes by touching them (zoom disabled)
    * - 'highlight': Drawing with highlighter (zoom disabled)
+   * - 'text': Tap to place text annotation (zoom disabled)
    */
   drawingMode?: DrawingMode;
 
@@ -159,6 +164,11 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    * Drawing tool configuration.
    */
   drawingTool?: DrawingTool;
+
+  /**
+   * Text tool configuration for text annotations.
+   */
+  textTool?: TextTool;
 
   /**
    * Callback when an error occurs.
@@ -230,11 +240,13 @@ export type NativeZoomablePdfScrollViewRef = {
   clearStrokes: (page?: number) => void;
 
   /**
-   * Get all annotations (strokes) from all pages.
-   * Returns a promise with Record<pageIndex, strokes[]>.
-   * Strokes are stored natively - use this to retrieve them when needed.
+   * Get all annotations (strokes and text) from all pages.
+   * Returns a promise with Record<pageIndex, { strokes, text }>.
+   * Annotations are stored natively - use this to retrieve them when needed.
    */
-  getAnnotations: () => Promise<Record<string, AnnotationStroke[]>>;
+  getAnnotations: () => Promise<
+    Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
+  >;
 };
 
 // --- Native component ---
@@ -273,6 +285,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
     backgroundColor,
     drawingMode = 'view',
     drawingTool = DEFAULT_DRAWING_TOOL,
+    textTool = DEFAULT_TEXT_TOOL,
     onError,
     onLayout,
     onLoadComplete,
@@ -316,7 +329,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
         }
       }
     },
-    getAnnotations: async (): Promise<Record<string, AnnotationStroke[]>> => {
+    getAnnotations: async () => {
       if (viewRef.current) {
         const handle = findNodeHandle(viewRef.current);
         if (handle) {
@@ -401,6 +414,8 @@ export const NativeZoomablePdfScrollView = forwardRef<
       strokeColor={drawingTool.color}
       strokeWidth={drawingTool.strokeWidth}
       strokeOpacity={drawingTool.opacity}
+      textColor={textTool.color}
+      textFontSize={textTool.fontSize}
       onLayout={onLayout}
       onPdfError={handlePdfError}
       onPdfLoadComplete={handlePdfLoadComplete}

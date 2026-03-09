@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,6 +14,7 @@ import {
   type DrawingTool,
   DEFAULT_DRAWING_TOOL,
   DEFAULT_HIGHLIGHTER_TOOL,
+  DEFAULT_TEXT_TOOL,
   type AnnotationPage,
 } from 'react-native-pdf-light';
 import { useAsset } from '../assets.utils';
@@ -34,6 +35,7 @@ const MODES: ModeButton[] = [
   { mode: 'draw', label: 'Draw', color: '#2196F3' },
   { mode: 'highlight', label: 'Highlight', color: '#FFC107' },
   { mode: 'erase', label: 'Erase', color: '#f44336' },
+  { mode: 'text', label: 'Text', color: '#9C27B0' },
 ];
 
 export function DrawingScreen({ onBack }: Props) {
@@ -62,9 +64,7 @@ export function DrawingScreen({ onBack }: Props) {
     pageIndicatorRef.current?.setPage(page);
   }, []);
 
-  const handleZoomChange = useCallback((scale: number) => {
-    console.log('Zoom:', scale);
-  }, []);
+  const handleZoomChange = useCallback((scale: number) => {}, []);
 
   const handleClearAll = useCallback(() => {
     pdfViewRef.current?.clearStrokes(-1);
@@ -92,7 +92,7 @@ export function DrawingScreen({ onBack }: Props) {
             color: '#0000ff',
             fontSize: 16,
             point: [0.1, 0.25],
-            str: 'This is an annotation!',
+            str: 'This is a static annotation!',
           },
         ],
       },
@@ -104,13 +104,17 @@ export function DrawingScreen({ onBack }: Props) {
     const result = await pdfViewRef.current?.getAnnotations();
     if (result) {
       const strokeCount = Object.values(result).reduce(
-        (sum, strokes) => sum + strokes.length,
+        (sum, page) => sum + page.strokes.length,
+        0
+      );
+      const textCount = Object.values(result).reduce(
+        (sum, page) => sum + page.text.length,
         0
       );
       console.log('Annotations:', JSON.stringify(result, null, 2));
       Alert.alert(
         'Annotations',
-        `Total strokes: ${strokeCount}\n\nCheck console for full data.`
+        `Strokes: ${strokeCount}, Texts: ${textCount}\n\nCheck console for full data.`
       );
     }
   }, []);
@@ -169,6 +173,7 @@ export function DrawingScreen({ onBack }: Props) {
         annotations={annotations}
         drawingMode={drawingMode}
         drawingTool={drawingTool}
+        textTool={DEFAULT_TEXT_TOOL}
         onDrawingStart={() => console.log('Drawing started')}
         onDrawingEnd={() => console.log('Drawing ended')}
         onLoadComplete={handleLoadComplete}

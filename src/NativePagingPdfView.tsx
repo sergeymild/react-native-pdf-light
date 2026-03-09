@@ -210,11 +210,13 @@ export type NativePagingPdfViewRef = {
   clearStrokes: (page?: number) => void;
 
   /**
-   * Get all annotations (strokes) from all pages.
-   * Returns a promise with Record<pageIndex, strokes[]>.
-   * Strokes are stored natively - use this to retrieve them when needed.
+   * Get all annotations (strokes and text) from all pages.
+   * Returns a promise with Record<pageIndex, { strokes, text }>.
+   * Annotations are stored natively - use this to retrieve them when needed.
    */
-  getAnnotations: () => Promise<Record<string, AnnotationStroke[]>>;
+  getAnnotations: () => Promise<
+    Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
+  >;
 };
 
 // --- Native component ---
@@ -292,7 +294,7 @@ export const NativePagingPdfView = forwardRef<
         }
       }
     },
-    getAnnotations: async (): Promise<Record<string, AnnotationStroke[]>> => {
+    getAnnotations: async () => {
       if (viewRef.current) {
         const handle = findNodeHandle(viewRef.current);
         if (handle) {

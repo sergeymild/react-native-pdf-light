@@ -7,6 +7,7 @@ enum DrawingMode: String {
     case draw = "draw"
     case erase = "erase"
     case highlight = "highlight"
+    case text = "text"
 }
 
 // MARK: - Drawing Stroke
@@ -85,6 +86,63 @@ struct PageStrokes: Codable {
     }
 
     func getAllStrokes() -> [Int: [DrawingStroke]] {
+        return pages
+    }
+}
+
+// MARK: - Drawing Text
+
+struct DrawingText {
+    let id: String
+    let color: String
+    let fontSize: CGFloat
+    var point: [CGFloat]  // [normalizedX, normalizedY]
+    let str: String
+}
+
+// MARK: - Per-Page Texts Container
+
+struct PageTexts {
+    var pages: [Int: [DrawingText]] = [:]
+
+    func getTexts(forPage page: Int) -> [DrawingText] {
+        return pages[page] ?? []
+    }
+
+    mutating func addText(_ text: DrawingText, toPage page: Int) {
+        if pages[page] == nil {
+            pages[page] = []
+        }
+        pages[page]?.append(text)
+    }
+
+    mutating func moveText(withId id: String, toPoint point: [CGFloat], onPage page: Int) {
+        guard var texts = pages[page] else { return }
+        if let index = texts.firstIndex(where: { $0.id == id }) {
+            texts[index].point = point
+            pages[page] = texts
+        }
+    }
+
+    mutating func removeText(withId id: String, fromPage page: Int) -> Bool {
+        guard var texts = pages[page] else { return false }
+        if let index = texts.firstIndex(where: { $0.id == id }) {
+            texts.remove(at: index)
+            pages[page] = texts
+            return true
+        }
+        return false
+    }
+
+    mutating func clearTexts(forPage page: Int) {
+        pages[page] = []
+    }
+
+    mutating func clearAllTexts() {
+        pages = [:]
+    }
+
+    func getAllTexts() -> [Int: [DrawingText]] {
         return pages
     }
 }

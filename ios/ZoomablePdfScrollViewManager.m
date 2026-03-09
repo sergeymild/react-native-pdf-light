@@ -30,6 +30,10 @@ RCT_EXPORT_VIEW_PROPERTY(onMiddleClick, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawingStart, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawingEnd, RCTDirectEventBlock)
 
+// Text annotation props
+RCT_EXPORT_VIEW_PROPERTY(textColor, NSString)
+RCT_EXPORT_VIEW_PROPERTY(textFontSize, CGFloat)
+
 // Commands
 RCT_EXTERN_METHOD(resetZoom:(nonnull NSNumber *)node)
 RCT_EXTERN_METHOD(scrollToPage:(nonnull NSNumber *)node page:(int)page animated:(BOOL)animated)

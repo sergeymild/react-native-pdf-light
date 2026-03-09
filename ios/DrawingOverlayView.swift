@@ -35,6 +35,7 @@ class DrawingOverlayView: UIView {
     // Multi-page mode (for ZoomablePdfScrollView)
     var multiPageMode: Bool = false
     var pageCount: Int = 0
+    var pageWidth: CGFloat = 0
     var pageHeight: CGFloat = 0
 
     // MARK: - Initialization
@@ -57,8 +58,8 @@ class DrawingOverlayView: UIView {
 
         // Configure tiled layer for better performance
         tiledLayer.tileSize = CGSize(width: 512, height: 512)
-        tiledLayer.levelsOfDetail = 1
-        tiledLayer.levelsOfDetailBias = 0
+        tiledLayer.levelsOfDetail = 4
+        tiledLayer.levelsOfDetailBias = 3
     }
 
     // MARK: - Drawing
@@ -76,7 +77,7 @@ class DrawingOverlayView: UIView {
                 let pageRect = CGRect(
                     x: 0,
                     y: CGFloat(page) * pageHeight,
-                    width: bounds.width,
+                    width: pageWidth,
                     height: pageHeight
                 )
 
@@ -95,6 +96,14 @@ class DrawingOverlayView: UIView {
                     zoomScale: zoomScale,
                     useNormalized: useNormalizedCoordinates
                 )
+
+                controller.drawTexts(
+                    in: context,
+                    page: page,
+                    contentRect: pageRect,
+                    useNormalized: useNormalizedCoordinates,
+                    zoomScale: zoomScale
+                )
             }
         } else {
             // Single page mode
@@ -112,6 +121,14 @@ class DrawingOverlayView: UIView {
                 contentRect: contentRect,
                 zoomScale: zoomScale,
                 useNormalized: useNormalizedCoordinates
+            )
+
+            controller.drawTexts(
+                in: context,
+                page: pageIndex,
+                contentRect: contentRect,
+                useNormalized: useNormalizedCoordinates,
+                zoomScale: zoomScale
             )
         }
     }

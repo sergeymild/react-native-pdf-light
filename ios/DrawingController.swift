@@ -20,6 +20,9 @@ protocol DrawingControllerDelegate: AnyObject {
 
     /// Called when the view needs to redraw (during active drawing)
     func drawingControllerNeedsRedraw(_ controller: DrawingController)
+
+    /// Called when user taps in text mode to request text input
+    func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int)
 }
 
 // MARK: - DrawingController
@@ -46,6 +49,9 @@ class DrawingController {
 
     /// Strokes organized by page
     private(set) var pageStrokes = PageStrokes()
+
+    /// Text annotations organized by page
+    private(set) var pageTexts = PageTexts()
 
     /// Active stroke being drawn (page index and path points in content coordinates)
     private var activeStroke: (page: Int, path: [CGPoint])?
@@ -81,6 +87,32 @@ class DrawingController {
         pageStrokes.clearAllStrokes()
     }
 
+    // MARK: - Text Management
+
+    func addText(_ text: DrawingText, toPage page: Int) {
+        pageTexts.addText(text, toPage: page)
+    }
+
+    func getTexts(forPage page: Int) -> [DrawingText] {
+        return pageTexts.getTexts(forPage: page)
+    }
+
+    func removeText(withId id: String, onPage page: Int) {
+        _ = pageTexts.removeText(withId: id, fromPage: page)
+    }
+
+    func moveText(withId id: String, toPoint point: [CGFloat], onPage page: Int) {
+        pageTexts.moveText(withId: id, toPoint: point, onPage: page)
+    }
+
+    func clearTexts(forPage page: Int) {
+        pageTexts.clearTexts(forPage: page)
+    }
+
+    func clearAllTexts() {
+        pageTexts.clearAllTexts()
+    }
+
     // MARK: - Touch Handling
 
     /// Handle touch began event
@@ -91,7 +123,10 @@ class DrawingController {
     func handleTouchBegan(_ point: CGPoint, page: Int, contentRect: CGRect) {
         guard drawingMode != .view else { return }
 
-        if drawingMode == .erase {
+        if drawingMode == .text {
+            // In text mode, notify delegate to show text input at this point
+            delegate?.drawingController(self, didRequestTextInputAt: point, onPage: page)
+        } else if drawingMode == .erase {
             // Try to erase at this point
             eraseStroke(at: point, page: page, contentRect: contentRect)
         } else {
@@ -352,14 +387,66 @@ class DrawingController {
         context.strokePath()
     }
 
+    // MARK: - Text Rendering
+
+    /// Draw all text annotations for a page
+    func drawTexts(in context: CGContext, page: Int, contentRect: CGRect, useNormalized: Bool = false, zoomScale: CGFloat = 1.0) {
+        let texts = pageTexts.getTexts(forPage: page)
+        guard !texts.isEmpty else { return }
+
+        UIGraphicsPushContext(context)
+        defer { UIGraphicsPopContext() }
+
+        for text in texts {
+            guard text.point.count >= 2 else { continue }
+
+            let color = parseColor(text.color)
+            // Don't adjust for zoomScale — overlay is inside UIScrollView content,
+            // so text scales naturally with zoom (like the PDF itself)
+            let fontSize = text.fontSize
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: fontSize),
+                .foregroundColor: color
+            ]
+
+            let x: CGFloat
+            let y: CGFloat
+            let maxWidth: CGFloat
+
+            if useNormalized && !contentRect.isEmpty {
+                let pt = normalizedToContent(text.point, contentRect: contentRect)
+                x = pt.x
+                y = pt.y
+                maxWidth = contentRect.maxX - pt.x
+            } else {
+                x = text.point[0]
+                y = text.point[1]
+                maxWidth = contentRect.width - x
+            }
+
+            let attributedString = NSAttributedString(string: text.str, attributes: attributes)
+            let drawRect = CGRect(x: x, y: y, width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude)
+
+            attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+        }
+    }
+
     // MARK: - Export
 
     /// Get all annotations as a dictionary suitable for sending to React Native
-    func getAnnotationsForExport() -> [String: [[String: Any]]] {
-        var result: [String: [[String: Any]]] = [:]
-        let allStrokes = pageStrokes.getAllStrokes()
+    func getAnnotationsForExport() -> [String: [String: Any]] {
+        var result: [String: [String: Any]] = [:]
 
-        for (page, strokes) in allStrokes {
+        // Collect all pages that have strokes or texts
+        let allStrokes = pageStrokes.getAllStrokes()
+        let allTexts = pageTexts.getAllTexts()
+        let allPages = Set(allStrokes.keys).union(Set(allTexts.keys))
+
+        for page in allPages {
+            var pageDict: [String: Any] = [:]
+
+            // Strokes
+            let strokes = allStrokes[page] ?? []
             var strokesArray: [[String: Any]] = []
             for stroke in strokes {
                 let strokeDict: [String: Any] = [
@@ -371,7 +458,24 @@ class DrawingController {
                 ]
                 strokesArray.append(strokeDict)
             }
-            result[String(page)] = strokesArray
+            pageDict["strokes"] = strokesArray
+
+            // Texts
+            let texts = allTexts[page] ?? []
+            var textsArray: [[String: Any]] = []
+            for text in texts {
+                let textDict: [String: Any] = [
+                    "id": text.id,
+                    "color": text.color,
+                    "fontSize": text.fontSize,
+                    "point": text.point,
+                    "str": text.str
+                ]
+                textsArray.append(textDict)
+            }
+            pageDict["text"] = textsArray
+
+            result[String(page)] = pageDict
         }
 
         return result

@@ -192,6 +192,10 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
         }
     }
 
+    func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
+        // Text mode not yet implemented for paging viewer
+    }
+
     private func updateBackgroundColor() {
         backgroundColor = pdfBackgroundColor
         // Update current page background

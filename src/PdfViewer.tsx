@@ -5,7 +5,7 @@ import {
   NativeZoomablePdfScrollView,
   type NativeZoomablePdfScrollViewRef,
 } from './NativeZoomablePdfScrollView';
-import type { DrawingMode, DrawingTool } from './drawing/types';
+import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 
 // --- Unified Event Types ---
 
@@ -145,6 +145,11 @@ type PdfViewerCommonProps = {
   drawingTool?: DrawingTool;
 
   /**
+   * Text tool configuration for text annotations.
+   */
+  textTool?: TextTool;
+
+  /**
    * Callback when drawing starts.
    */
   onDrawingStart?: () => void;
@@ -175,6 +180,7 @@ type PdfViewerCommonProps = {
    * Clear annotations[page].strokes array.
    */
   onStrokesCleared?: (page: number) => void;
+
 
   style?: ViewStyle;
 };

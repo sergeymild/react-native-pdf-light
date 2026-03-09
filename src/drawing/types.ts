@@ -1,7 +1,7 @@
 /**
  * Drawing mode for the PDF view.
  */
-export type DrawingMode = 'view' | 'draw' | 'erase' | 'highlight';
+export type DrawingMode = 'view' | 'draw' | 'erase' | 'highlight' | 'text';
 
 /**
  * Drawing tool configuration.
@@ -55,4 +55,22 @@ export const DEFAULT_HIGHLIGHTER_TOOL: DrawingTool = {
   color: '#FFFF00',
   strokeWidth: 20,
   opacity: 0.3,
+};
+
+/**
+ * Text tool configuration for text annotations.
+ */
+export interface TextTool {
+  /** Text color in hex format "#RRGGBB" */
+  color: string;
+  /** Font size in points */
+  fontSize: number;
+}
+
+/**
+ * Default text tool configuration.
+ */
+export const DEFAULT_TEXT_TOOL: TextTool = {
+  color: '#0000FF',
+  fontSize: 16,
 };

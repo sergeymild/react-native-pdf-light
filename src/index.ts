@@ -55,5 +55,6 @@ export {
 export {
   DEFAULT_DRAWING_TOOL,
   DEFAULT_HIGHLIGHTER_TOOL,
+  DEFAULT_TEXT_TOOL,
 } from './drawing/types';
-export type { DrawingMode, DrawingTool } from './drawing/types';
+export type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
