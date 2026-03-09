@@ -20,6 +20,9 @@ class DrawingOverlayView: UIView {
     /// The drawing controller that manages stroke state and rendering
     weak var drawingController: DrawingController?
 
+    /// Text annotation handler for text mode touch interception (single-page mode only)
+    weak var textAnnotationHandler: TextAnnotationHandler?
+
     /// The page index this overlay represents
     var pageIndex: Int = 0
 
@@ -58,8 +61,8 @@ class DrawingOverlayView: UIView {
 
         // Configure tiled layer for better performance
         tiledLayer.tileSize = CGSize(width: 512, height: 512)
-        tiledLayer.levelsOfDetail = 4
-        tiledLayer.levelsOfDetailBias = 3
+        tiledLayer.levelsOfDetail = 1
+        tiledLayer.levelsOfDetailBias = 0
     }
 
     // MARK: - Drawing
@@ -143,6 +146,11 @@ class DrawingOverlayView: UIView {
             return
         }
 
+        // In text mode, delegate to text annotation handler
+        if controller.drawingMode == .text, let handler = textAnnotationHandler {
+            if handler.handleTouchBegan(touch) { return }
+        }
+
         let location = touch.location(in: self)
         let point: CGPoint
         if useNormalizedCoordinates && !contentRect.isEmpty {
@@ -161,6 +169,12 @@ class DrawingOverlayView: UIView {
             return
         }
 
+        // Handle text dragging
+        if let handler = textAnnotationHandler, handler.isDraggingText {
+            handler.handleTouchMoved(touch)
+            return
+        }
+
         let location = touch.location(in: self)
         let point: CGPoint
         if useNormalizedCoordinates && !contentRect.isEmpty {
@@ -173,8 +187,14 @@ class DrawingOverlayView: UIView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let controller = drawingController,
-              controller.drawingMode != .view else {
+              controller.drawingMode != .view,
+              let touch = touches.first else {
             super.touchesEnded(touches, with: event)
+            return
+        }
+
+        if let handler = textAnnotationHandler, handler.isDraggingText {
+            handler.handleTouchEnded(touch)
             return
         }
 
@@ -185,6 +205,11 @@ class DrawingOverlayView: UIView {
         guard let controller = drawingController,
               controller.drawingMode != .view else {
             super.touchesCancelled(touches, with: event)
+            return
+        }
+
+        if let handler = textAnnotationHandler, handler.isDraggingText {
+            handler.handleTouchCancelled()
             return
         }
 

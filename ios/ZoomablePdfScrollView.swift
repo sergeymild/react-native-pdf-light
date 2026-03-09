@@ -2,7 +2,7 @@ import UIKit
 
 // MARK: - ZoomablePdfScrollView (scrollable PDF viewer with global zoom using UICollectionView)
 
-class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, DrawingControllerDelegate, UITextViewDelegate {
+class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, DrawingControllerDelegate, TextAnnotationHandlerDelegate {
 
     // MARK: - React Props
 
@@ -56,8 +56,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     @objc var onDrawingEnd: RCTDirectEventBlock?
 
     // Text annotation props
-    @objc var textColor = "#0000FF"
-    @objc var textFontSize: CGFloat = 16.0
+    @objc var textColor = "#0000FF" { didSet { textAnnotationHandler.textColor = textColor } }
+    @objc var textFontSize: CGFloat = 16.0 { didSet { textAnnotationHandler.textFontSize = textFontSize } }
 
     // Store load complete event if callback not yet set
     private var pendingLoadCompleteEvent: [String: Any]?
@@ -92,17 +92,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     private var realDrawingMode = DrawingMode.view
     private let drawingOverlay = DrawingOverlayView()
 
-    // Text input
-    private var textInputView: UITextView?
-    private var textInputPage: Int = 0
-    private var textInputNormalizedPoint: CGPoint = .zero
-
-    // Text drag
-    private var isDraggingText: Bool = false
-    private var draggingTextPage: Int = 0
-    private var draggingLabel: UILabel?
-    private var draggingTouchOffset: CGPoint = .zero  // offset from touch to text origin
-    private var draggingText: DrawingText?  // the text being dragged (removed from controller during drag)
+    // Text annotation handler
+    private let textAnnotationHandler = TextAnnotationHandler()
 
     // MARK: - Initialization
 
@@ -122,6 +113,9 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         // Setup drawing controller
         drawingController.delegate = self
+
+        // Setup text annotation handler
+        textAnnotationHandler.delegate = self
 
         // Setup outer scroll view (for zooming)
         scrollView.delegate = self
@@ -389,7 +383,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         // Dismiss text input when switching modes
         if mode != .text {
-            commitTextInput()
+            textAnnotationHandler.commitTextInput()
         }
 
         // Disable all scroll/zoom gestures in drawing modes (draw, erase, highlight, text)
@@ -470,235 +464,26 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     }
 
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
-        // Commit any existing text input first
-        commitTextInput()
-        showTextInput(at: normalizedPoint, page: page)
+        // Handled by TextAnnotationHandler via touch interception
     }
 
-    // MARK: - Text Input
+    // MARK: - TextAnnotationHandlerDelegate
 
-    private func showTextInput(at normalizedPoint: CGPoint, page: Int) {
-        textInputPage = page
-        textInputNormalizedPoint = normalizedPoint
+    var textHandlerDrawingController: DrawingController { drawingController }
+    var textHandlerContentContainer: UIView { contentContainer }
+    var textHandlerHostView: UIView { self }
+    var textHandlerZoomScale: CGFloat { scrollView.zoomScale }
 
-        let pageRect = contentRectForPage(page)
-
-        // Position in content container coordinates (unzoomed)
-        let contentX = normalizedPoint.x * pageRect.width
-        let contentY = pageRect.minY + normalizedPoint.y * pageRect.height
-
-        // Available width from tap point to right edge (in content coords)
-        let maxWidthInContent = pageRect.width - contentX
-
-        // Use base fontSize — UIScrollView zoom transform will scale it visually
-        let textView = UITextView()
-        textView.backgroundColor = .clear
-        textView.font = UIFont.systemFont(ofSize: textFontSize)
-        textView.textColor = UIColor(hexString: textColor) ?? .blue
-        textView.isScrollEnabled = false
-        textView.textContainerInset = .zero
-        textView.textContainer.lineFragmentPadding = 0
-        textView.returnKeyType = .done
-        textView.delegate = self
-
-        // Position in content coordinates — textView lives inside contentContainer
-        // so it zooms and scrolls with the PDF content
-        let textViewWidth = max(60, maxWidthInContent)
-        textView.frame = CGRect(x: contentX, y: contentY, width: textViewWidth, height: textFontSize + 4)
-        textView.autoresizingMask = []
-
-        contentContainer.addSubview(textView)
-        textView.becomeFirstResponder()
-
-        textInputView = textView
-
-        // Observe text changes for auto-resize
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(textInputDidChange(_:)),
-            name: UITextView.textDidChangeNotification,
-            object: textView
-        )
+    func textHandlerContentRectForPage(_ page: Int) -> CGRect {
+        return contentRectForPage(page)
     }
 
-    @objc private func textInputDidChange(_ notification: Notification) {
-        guard let textView = notification.object as? UITextView,
-              textView === textInputView else { return }
-
-        // Auto-resize height to fit content (in content coordinates)
-        let fixedWidth = textView.frame.width
-        let newSize = textView.sizeThatFits(CGSize(width: fixedWidth, height: CGFloat.greatestFiniteMagnitude))
-        textView.frame.size.height = max(newSize.height, textFontSize + 4)
+    func textHandlerPageForPoint(_ pointInContent: CGPoint) -> Int {
+        return pageIndexForPoint(pointInContent)
     }
 
-    // MARK: - UITextViewDelegate
-
-    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        if text == "\n" {
-            commitTextInput()
-            return false
-        }
-        return true
-    }
-
-    private func commitTextInput() {
-        guard let textView = textInputView else { return }
-
-        NotificationCenter.default.removeObserver(self, name: UITextView.textDidChangeNotification, object: textView)
-
-        let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        textView.resignFirstResponder()
-        textView.removeFromSuperview()
-        textInputView = nil
-
-        guard !text.isEmpty else { return }
-
-        // Store text natively (like strokes)
-        let drawingText = DrawingText(
-            id: UUID().uuidString,
-            color: textColor,
-            fontSize: textFontSize,
-            point: [textInputNormalizedPoint.x, textInputNormalizedPoint.y],
-            str: text
-        )
-        drawingController.addText(drawingText, toPage: textInputPage)
+    func textHandlerRedrawOverlay() {
         drawingOverlay.setNeedsDisplay()
-    }
-
-    // MARK: - Text Dragging
-
-    /// Hit test against user-created text annotations (stored in controller)
-    private func hitTestTextAnnotation(at normalizedPoint: CGPoint, page: Int) -> (Int, DrawingText)? {
-        let texts = drawingController.getTexts(forPage: page)
-        let pageRect = contentRectForPage(page)
-        guard !pageRect.isEmpty else {
-                return nil
-        }
-
-        for (index, text) in texts.enumerated() {
-            guard text.point.count >= 2 else { continue }
-
-            let textX = text.point[0]
-            let textY = text.point[1]
-
-            // Calculate actual text size using NSAttributedString
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: text.fontSize)
-            ]
-            let attrStr = NSAttributedString(string: text.str, attributes: attributes)
-            let maxWidth = pageRect.width * (1 - textX)
-            let boundingRect = attrStr.boundingRect(
-                with: CGSize(width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin],
-                context: nil
-            )
-
-            // Convert pixel dimensions to normalized
-            let normalizedWidth = boundingRect.width / pageRect.width
-            let normalizedHeight = boundingRect.height / pageRect.height
-
-            let padding: CGFloat = 0.02
-            let hitRect = CGRect(
-                x: textX - padding,
-                y: textY - padding,
-                width: normalizedWidth + padding * 2,
-                height: normalizedHeight + padding * 2
-            )
-
-            if hitRect.contains(normalizedPoint) {
-                return (index, text)
-            }
-        }
-        return nil
-    }
-
-    private func startDraggingText(textAnnotation: DrawingText, textIndex: Int, page: Int, normalizedPoint: CGPoint, touchLocation: CGPoint) {
-        isDraggingText = true
-        draggingTextPage = page
-
-        // Remove text from controller so overlay doesn't draw it (avoids visual duplication)
-        draggingText = textAnnotation
-        drawingController.removeText(withId: textAnnotation.id, onPage: page)
-        drawingOverlay.setNeedsDisplay()
-
-        let zoomScale = scrollView.zoomScale
-        let pageRect = contentRectForPage(page)
-
-        // Create floating label
-        let label = UILabel()
-        label.text = textAnnotation.str
-        label.font = UIFont.systemFont(ofSize: textAnnotation.fontSize * zoomScale)
-        label.textColor = (UIColor(hexString: textAnnotation.color) ?? .blue).withAlphaComponent(0.7)
-        label.numberOfLines = 0
-        label.backgroundColor = .clear
-
-        // Size the label
-        let textOriginX = textAnnotation.point[0] * pageRect.width
-        let maxWidth = (pageRect.width - textOriginX) * zoomScale
-        let maxSize = CGSize(width: max(120, maxWidth), height: CGFloat.greatestFiniteMagnitude)
-        let labelSize = label.sizeThatFits(maxSize)
-        label.frame.size = labelSize
-
-        // screen = content * zoomScale - contentOffset
-        let contentX = textAnnotation.point[0] * pageRect.width
-        let contentY = pageRect.minY + textAnnotation.point[1] * pageRect.height
-        let screenX = contentX * zoomScale - scrollView.contentOffset.x
-        let screenY = contentY * zoomScale - scrollView.contentOffset.y
-        label.frame.origin = CGPoint(x: screenX, y: screenY)
-
-        draggingTouchOffset = CGPoint(x: touchLocation.x - screenX, y: touchLocation.y - screenY)
-
-        addSubview(label)
-        draggingLabel = label
-    }
-
-    private func updateDraggingText(touchLocation: CGPoint) {
-        guard let label = draggingLabel else { return }
-        label.frame.origin = CGPoint(
-            x: touchLocation.x - draggingTouchOffset.x,
-            y: touchLocation.y - draggingTouchOffset.y
-        )
-    }
-
-    private func finishDraggingText(touchLocation: CGPoint) {
-        guard isDraggingText, let text = draggingText else {
-            cancelDraggingText()
-            return
-        }
-
-        // Convert screen position back to normalized coordinates
-        let zoomScale = scrollView.zoomScale
-        let labelOrigin = CGPoint(
-            x: touchLocation.x - draggingTouchOffset.x,
-            y: touchLocation.y - draggingTouchOffset.y
-        )
-
-        // content = (screen + contentOffset) / zoomScale
-        let contentX = (labelOrigin.x + scrollView.contentOffset.x) / zoomScale
-        let contentY = (labelOrigin.y + scrollView.contentOffset.y) / zoomScale
-
-        let pageRect = contentRectForPage(draggingTextPage)
-        let normalizedX = contentX / pageRect.width
-        let normalizedY = (contentY - pageRect.minY) / pageRect.height
-
-        // Re-add text with new position
-        let movedText = DrawingText(
-            id: text.id,
-            color: text.color,
-            fontSize: text.fontSize,
-            point: [normalizedX, normalizedY],
-            str: text.str
-        )
-        drawingController.addText(movedText, toPage: draggingTextPage)
-        cancelDraggingText()
-        drawingOverlay.setNeedsDisplay()
-    }
-
-    private func cancelDraggingText() {
-        draggingLabel?.removeFromSuperview()
-        draggingLabel = nil
-        isDraggingText = false
-        draggingText = nil
     }
 
     // MARK: - PDF Loading
@@ -940,33 +725,18 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        // If there's a text input view, check if touch is outside it
-        if let textView = textInputView {
-            let touchInContent = touch.location(in: contentContainer)
-            if !textView.frame.contains(touchInContent) {
-                commitTextInput()
-                if realDrawingMode == .text {
-                    return
-                }
-            }
+        // In text mode, delegate to handler
+        if realDrawingMode == .text {
+            if textAnnotationHandler.handleTouchBegan(touch) { return }
         }
 
         let location = touch.location(in: contentContainer)
         let page = pageIndexForPoint(location)
         let pageRect = contentRectForPage(page)
 
-        // Convert to page-local coordinates then normalize to 0-1
         let localX = location.x / pageRect.width
         let localY = (location.y - pageRect.minY) / pageRect.height
         let normalizedPoint = CGPoint(x: localX, y: localY)
-
-        // In text mode, check if touching an existing text annotation
-        if realDrawingMode == .text {
-            if let (textIndex, textAnnotation) = hitTestTextAnnotation(at: normalizedPoint, page: page) {
-                startDraggingText(textAnnotation: textAnnotation, textIndex: textIndex, page: page, normalizedPoint: normalizedPoint, touchLocation: touch.location(in: self))
-                return
-            }
-        }
 
         drawingOverlay.pageIndex = page
         drawingOverlay.contentRect = pageRect
@@ -980,9 +750,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        // Handle text dragging
-        if isDraggingText {
-            updateDraggingText(touchLocation: touch.location(in: self))
+        if textAnnotationHandler.isDraggingText {
+            textAnnotationHandler.handleTouchMoved(touch)
             return
         }
 
@@ -1003,9 +772,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        // Handle text drag end
-        if isDraggingText {
-            finishDraggingText(touchLocation: touch.location(in: self))
+        if textAnnotationHandler.isDraggingText {
+            textAnnotationHandler.handleTouchEnded(touch)
             return
         }
 
@@ -1021,13 +789,8 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        if isDraggingText {
-            // Restore text at original position on cancel
-            if let text = draggingText {
-                drawingController.addText(text, toPage: draggingTextPage)
-                drawingOverlay.setNeedsDisplay()
-            }
-            cancelDraggingText()
+        if textAnnotationHandler.isDraggingText {
+            textAnnotationHandler.handleTouchCancelled()
             return
         }
 

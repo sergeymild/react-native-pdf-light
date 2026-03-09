@@ -16,6 +16,10 @@ RCT_EXPORT_VIEW_PROPERTY(strokeWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(strokeOpacity, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(strokes, NSString)
 
+// Text annotation props
+RCT_EXPORT_VIEW_PROPERTY(textColor, NSString)
+RCT_EXPORT_VIEW_PROPERTY(textFontSize, CGFloat)
+
 // Events
 RCT_EXPORT_VIEW_PROPERTY(onPdfError, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onPdfLoadComplete, RCTDirectEventBlock)

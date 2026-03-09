@@ -59,6 +59,10 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
     @objc var onDrawingStart: RCTDirectEventBlock?
     @objc var onDrawingEnd: RCTDirectEventBlock?
 
+    // Text annotation props
+    @objc var textColor = "#0000FF" { didSet { textAnnotationHandler.textColor = textColor } }
+    @objc var textFontSize: CGFloat = 16.0 { didSet { textAnnotationHandler.textFontSize = textFontSize } }
+
     // Store load complete event if callback not yet set
     private var pendingLoadCompleteEvent: [String: Any]?
 
@@ -85,6 +89,9 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
     // Drawing controller
     private let drawingController = DrawingController()
     private var realDrawingMode = DrawingMode.view
+
+    // Text annotation handler
+    let textAnnotationHandler = TextAnnotationHandler()
 
     // MARK: - Initialization
 
@@ -129,6 +136,11 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
         }
         realDrawingMode = mode
         drawingController.drawingMode = mode
+
+        // Dismiss text input when switching modes
+        if mode != .text {
+            textAnnotationHandler.commitTextInput()
+        }
 
         // Disable page swiping in drawing modes
         let isViewMode = mode == .view
@@ -193,7 +205,7 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
     }
 
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
-        // Text mode not yet implemented for paging viewer
+        // Handled by TextAnnotationHandler via touch interception in PdfPageViewController
     }
 
     private func updateBackgroundColor() {
@@ -348,6 +360,7 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
         pageVC.pageBackgroundColor = pdfBackgroundColor
         pageVC.shouldScrollToBottomOnLoad = scrollToBottom
         pageVC.drawingController = drawingController
+        pageVC.textAnnotationHandler = textAnnotationHandler
         pageVC.updateDrawingMode(realDrawingMode)
         pageVC.onZoomChange = { [weak self] scale in
             self?.onZoomChange?(["scale": scale])
@@ -436,9 +449,11 @@ class PagingPdfView: UIView, DrawingControllerDelegate {
     func clearStrokes(page: Int) {
         if page >= 0 {
             drawingController.clearStrokes(forPage: page)
+            drawingController.clearTexts(forPage: page)
         } else {
             // Clear all pages
             drawingController.clearAllStrokes()
+            drawingController.clearAllTexts()
         }
         if let currentVC = pageViewController?.viewControllers?.first as? PdfPageViewController {
             currentVC.redrawOverlay()
@@ -503,7 +518,7 @@ extension PagingPdfView: UIPageViewControllerDelegate {
 
 // MARK: - PdfPageViewController (single page with zoom)
 
-class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate, TextAnnotationHandlerDelegate {
 
     var pageIndex: Int = 0
     var minZoom: CGFloat = 1.0 {
@@ -525,6 +540,7 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
 
     // Drawing support
     weak var drawingController: DrawingController?
+    weak var textAnnotationHandler: TextAnnotationHandler?
     private var currentDrawingMode: DrawingMode = .view
     private let drawingOverlay = DrawingOverlayView()
 
@@ -568,8 +584,12 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         // Setup drawing overlay on top of image view (inside same container so it zooms together)
         drawingOverlay.pageIndex = pageIndex
         drawingOverlay.drawingController = drawingController
+        drawingOverlay.textAnnotationHandler = textAnnotationHandler
         drawingOverlay.useNormalizedCoordinates = true
         contentContainer.addSubview(drawingOverlay)
+
+        // Configure text handler delegate for this page
+        textAnnotationHandler?.delegate = self
 
         // Double tap to zoom (only works in middle zone)
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
@@ -624,6 +644,13 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
     private func updateImageViewFrame() {
         guard let image = imageView.image else { return }
 
+        // Don't update layout during zoom — UIScrollView manages contentContainer's transform
+        // Setting frame when transform != identity is undefined behavior and resets visual zoom
+        if scrollView.zoomScale != 1.0 {
+            updateContentInset()
+            return
+        }
+
         let viewSize = view.bounds.size
         let imageSize = image.size
 
@@ -631,15 +658,16 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         let scale = viewSize.width / imageSize.width
         let scaledHeight = imageSize.height * scale
 
-        let contentFrame = CGRect(x: 0, y: 0, width: viewSize.width, height: scaledHeight)
+        let contentSize = CGSize(width: viewSize.width, height: scaledHeight)
 
-        // Update container, image view, and drawing overlay frames
-        contentContainer.frame = contentFrame
+        // Use bounds + center instead of frame (safe with transforms)
+        contentContainer.bounds = CGRect(origin: .zero, size: contentSize)
+        contentContainer.center = CGPoint(x: contentSize.width / 2, y: contentSize.height / 2)
         imageView.frame = contentContainer.bounds
         drawingOverlay.frame = contentContainer.bounds
         drawingOverlay.contentRect = contentContainer.bounds
 
-        scrollView.contentSize = contentFrame.size
+        scrollView.contentSize = contentSize
 
         updateContentInset()
     }
@@ -758,6 +786,36 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         drawingOverlay.zoomScale = scrollView.zoomScale
         drawingOverlay.setNeedsDisplay()
         onZoomChange?(scrollView.zoomScale)
+    }
+
+    // MARK: - TextAnnotationHandlerDelegate
+
+    var textHandlerDrawingController: DrawingController {
+        return drawingController!
+    }
+
+    var textHandlerContentContainer: UIView {
+        return contentContainer
+    }
+
+    var textHandlerHostView: UIView {
+        return view
+    }
+
+    var textHandlerZoomScale: CGFloat {
+        return scrollView.zoomScale
+    }
+
+    func textHandlerContentRectForPage(_ page: Int) -> CGRect {
+        return contentContainer.bounds
+    }
+
+    func textHandlerPageForPoint(_ pointInContent: CGPoint) -> Int {
+        return pageIndex
+    }
+
+    func textHandlerRedrawOverlay() {
+        drawingOverlay.setNeedsDisplay()
     }
 
     // MARK: - UIGestureRecognizerDelegate
