@@ -11,6 +11,7 @@ import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -46,6 +47,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     // Drawing controller
     private val drawingController = DrawingController()
+    private lateinit var textAnnotationHandler: TextAnnotationHandler
 
     // PDF state
     private var mPdfRenderer: PdfRenderer? = null
@@ -88,6 +90,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
     init {
         drawingController.delegate = this
+        textAnnotationHandler = TextAnnotationHandler(context)
 
         // Initialize cache (10MB max)
         val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
@@ -118,6 +121,43 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
         addView(mRecyclerView)
         addView(mDrawingOverlay)
+
+        // Setup text annotation handler (after views are initialized)
+        textAnnotationHandler.delegate = object : TextAnnotationHandlerDelegate {
+            override val textHandlerDrawingController: DrawingController get() = drawingController
+            override val textHandlerContentContainer: View get() = mRecyclerView
+            override val textHandlerHostView: ViewGroup get() = this@ZoomablePdfScrollView
+            override val textHandlerZoomScale: Float get() = mScale
+
+            override fun textHandlerContentRectForPage(page: Int): RectF {
+                val pageHeightPx = getPageHeight()
+                return RectF(0f, page * pageHeightPx.toFloat(), width.toFloat(), (page + 1) * pageHeightPx.toFloat())
+            }
+
+            override fun textHandlerPageForPoint(pointInContent: PointF): Int {
+                val pageHeightPx = getPageHeight()
+                if (pageHeightPx <= 0) return 0
+                return (pointInContent.y / pageHeightPx).toInt().coerceIn(0, mActualPageCount - 1)
+            }
+
+            override fun textHandlerRedrawOverlay() {
+                mDrawingOverlay.post { mDrawingOverlay.invalidate() }
+            }
+        }
+        textAnnotationHandler.screenToContentConverter = { event ->
+            val scrollOffset = mRecyclerView.computeVerticalScrollOffset()
+            val paddingTop = mRecyclerView.paddingTop
+            val contentX = (event.x - mOffsetX) / mScale
+            val contentY = event.y / mScale - paddingTop + scrollOffset
+            PointF(contentX, contentY)
+        }
+        textAnnotationHandler.contentToScreenConverter = { contentPoint ->
+            val scrollOffset = mRecyclerView.computeVerticalScrollOffset()
+            val paddingTop = mRecyclerView.paddingTop
+            val screenX = contentPoint.x * mScale + mOffsetX
+            val screenY = (contentPoint.y - scrollOffset + paddingTop) * mScale
+            PointF(screenX, screenY)
+        }
 
         // Setup scale gesture detector
         mScaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -346,56 +386,53 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     }
 
     private fun handleDrawingTouch(event: MotionEvent) {
-        // Calculate which page we're on and normalize coordinates
-        val pageHeightPx = getPageHeight()
-        if (pageHeightPx <= 0) {
-            Log.d("ZoomablePdf", "handleDrawingTouch: pageHeightPx <= 0, returning")
+        // In text mode, delegate to text annotation handler
+        if (drawingController.drawingMode == DrawingMode.TEXT) {
+            Log.d("PDFText", "ZoomableTouch: action=${event.action}, xy=(${event.x}, ${event.y}), scale=$mScale")
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    val result = textAnnotationHandler.handleTouchDown(event)
+                    Log.d("PDFText", "ZoomableTouchDown result=$result, hasInput=${textAnnotationHandler.hasActiveTextInput}, isDragging=${textAnnotationHandler.isDraggingText}")
+                }
+                MotionEvent.ACTION_MOVE -> textAnnotationHandler.handleTouchMove(event)
+                MotionEvent.ACTION_UP -> textAnnotationHandler.handleTouchUp(event)
+                MotionEvent.ACTION_CANCEL -> textAnnotationHandler.handleTouchCancel()
+            }
             return
         }
 
+        // Calculate which page we're on and normalize coordinates
+        val pageHeightPx = getPageHeight()
+        if (pageHeightPx <= 0) return
+
         // Ensure overlay is set up before handling touch
         if (mDrawingOverlay.pageCount == 0 || mDrawingOverlay.pageHeight <= 0f) {
-            Log.d("ZoomablePdf", "handleDrawingTouch: overlay not set up, calling updateDrawingOverlay")
             updateDrawingOverlay()
         }
 
         val scrollOffset = mRecyclerView.computeVerticalScrollOffset()
         val paddingTop = mRecyclerView.paddingTop
 
-        // Convert screen coordinates to content coordinates (accounting for zoom, pan, and padding)
-        // RV page positions: paddingTop + page * pageHeight (in RV local space)
-        // RV local y = screen_y / scale (pivotY=0)
-        // Content y = rv_local_y - paddingTop + scrollOffset
         val contentX = (event.x - mOffsetX) / mScale
         val contentY = event.y / mScale - paddingTop + scrollOffset
 
-        // Determine which page the touch is on
         val pageIndex = (contentY / pageHeightPx).toInt().coerceIn(0, mActualPageCount - 1)
 
-        // Convert to normalized coordinates (0-1) within the page
         val normalizedX = contentX / width
         val normalizedY = (contentY - pageIndex * pageHeightPx) / pageHeightPx
         val point = PointF(normalizedX.toFloat(), normalizedY.toFloat())
 
-        // Content rect is used by drawing overlay - in this case we use the pageRect from multiPageMode
         val pageTop = pageIndex * pageHeightPx - scrollOffset
         val contentRect = RectF(0f, pageTop.toFloat(), width.toFloat(), (pageTop + pageHeightPx).toFloat())
 
-        Log.d("DRAW_DEBUG", "=== TOUCH INPUT ===")
-        Log.d("DRAW_DEBUG", "screen=(${event.x}, ${event.y}), mScale=$mScale, mOffsetX=$mOffsetX, scrollOffset=$scrollOffset")
-        Log.d("DRAW_DEBUG", "content=($contentX, $contentY), normalized=($normalizedX, $normalizedY), page=$pageIndex")
-        Log.d("DRAW_DEBUG", "width=$width, pageHeightPx=$pageHeightPx")
-
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                Log.d("ZoomablePdf", "handleDrawingTouch: ACTION_DOWN")
                 drawingController.handleTouchBegan(point, pageIndex, contentRect)
             }
             MotionEvent.ACTION_MOVE -> {
                 drawingController.handleTouchMoved(point, pageIndex, contentRect)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                Log.d("ZoomablePdf", "handleDrawingTouch: ACTION_UP/CANCEL")
                 drawingController.handleTouchEnded(pageIndex)
             }
         }
@@ -448,7 +485,12 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     // --- Drawing setters ---
 
     fun setDrawingMode(mode: String) {
-        drawingController.drawingMode = DrawingMode.fromString(mode)
+        val newMode = DrawingMode.fromString(mode)
+        // Commit text input when switching away from text mode
+        if (newMode != DrawingMode.TEXT) {
+            textAnnotationHandler.commitTextInput()
+        }
+        drawingController.drawingMode = newMode
         // Update drawing overlay and ensure it's on top
         updateDrawingOverlay()
         mDrawingOverlay.bringToFront()
@@ -466,11 +508,23 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         drawingController.strokeOpacity = opacity
     }
 
+    fun setTextColor(color: String) {
+        drawingController.textColor = color
+        textAnnotationHandler.textColor = color
+    }
+
+    fun setTextFontSize(size: Float) {
+        drawingController.textFontSize = size
+        textAnnotationHandler.textFontSize = size
+    }
+
     fun clearStrokes(page: Int) {
         if (page < 0) {
             drawingController.clearAllStrokes()
+            drawingController.clearAllTexts()
         } else {
             drawingController.clearStrokes(page)
+            drawingController.clearTexts(page)
         }
         mDrawingOverlay.invalidate()
     }

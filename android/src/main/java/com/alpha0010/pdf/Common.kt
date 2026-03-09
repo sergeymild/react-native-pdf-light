@@ -32,7 +32,8 @@ enum class DrawingMode(val jsName: String) {
     VIEW("view"),
     DRAW("draw"),
     ERASE("erase"),
-    HIGHLIGHT("highlight");
+    HIGHLIGHT("highlight"),
+    TEXT("text");
 
     companion object {
         fun fromString(value: String): DrawingMode {
@@ -67,6 +68,48 @@ data class DrawingStroke(
         map.putArray("path", pathArray)
 
         return map
+    }
+}
+
+// --- Drawing Text ---
+
+data class DrawingText(
+    val id: String,
+    val color: String,
+    val fontSize: Float,
+    val point: List<Float>,  // [normalizedX, normalizedY]
+    val str: String
+)
+
+// --- Page Texts Storage ---
+
+class PageTexts {
+    private val texts = mutableMapOf<Int, MutableList<DrawingText>>()
+
+    fun getTexts(forPage: Int): List<DrawingText> {
+        return texts[forPage] ?: emptyList()
+    }
+
+    fun addText(text: DrawingText, toPage: Int) {
+        val pageList = texts.getOrPut(toPage) { mutableListOf() }
+        pageList.add(text)
+    }
+
+    fun removeText(withId: String, fromPage: Int): Boolean {
+        val pageList = texts[fromPage] ?: return false
+        return pageList.removeAll { it.id == withId }
+    }
+
+    fun clearTexts(forPage: Int) {
+        texts.remove(forPage)
+    }
+
+    fun clearAllTexts() {
+        texts.clear()
+    }
+
+    fun getAllTexts(): Map<Int, List<DrawingText>> {
+        return texts.toMap()
     }
 }
 
@@ -126,9 +169,14 @@ class DrawingController {
     var strokeOpacity: Float = 1f
 
     private val pageStrokes = PageStrokes()
+    private val pageTexts = PageTexts()
     private var activeStroke: Pair<Int, MutableList<PointF>>? = null
     var isDrawing: Boolean = false
         private set
+
+    // Text props
+    var textColor: String = "#0000FF"
+    var textFontSize: Float = 16f
 
     // Stroke management
 
@@ -147,6 +195,28 @@ class DrawingController {
 
     fun clearAllStrokes() {
         pageStrokes.clearAllStrokes()
+    }
+
+    // Text management
+
+    fun addText(text: DrawingText, toPage: Int) {
+        pageTexts.addText(text, toPage)
+    }
+
+    fun getTexts(forPage: Int): List<DrawingText> {
+        return pageTexts.getTexts(forPage)
+    }
+
+    fun removeText(withId: String, fromPage: Int): Boolean {
+        return pageTexts.removeText(withId, fromPage)
+    }
+
+    fun clearTexts(forPage: Int) {
+        pageTexts.clearTexts(forPage)
+    }
+
+    fun clearAllTexts() {
+        pageTexts.clearAllTexts()
     }
 
     // Touch handling
@@ -235,6 +305,37 @@ class DrawingController {
                 }
             }
         }
+
+        // Check text annotations
+        val texts = pageTexts.getTexts(page)
+        for (text in texts.reversed()) {
+            if (text.point.size < 2) continue
+
+            val textX = text.point[0]
+            val textY = text.point[1]
+
+            val paint = Paint().apply {
+                textSize = text.fontSize
+                isAntiAlias = true
+            }
+            val textWidth = paint.measureText(text.str)
+            val normalizedWidth = if (contentRect.width() > 0) textWidth / contentRect.width() else 0f
+            val normalizedHeight = if (contentRect.height() > 0) text.fontSize / contentRect.height() else 0f
+
+            val padding = 0.02f
+            val hitRect = RectF(
+                textX - padding,
+                textY - padding,
+                textX + normalizedWidth + padding * 2,
+                textY + normalizedHeight + padding * 2
+            )
+
+            if (hitRect.contains(point.x, point.y)) {
+                pageTexts.removeText(text.id, page)
+                delegate?.onNeedsRedraw()
+                return
+            }
+        }
     }
 
     // Get active stroke for drawing
@@ -248,9 +349,15 @@ class DrawingController {
     fun getAnnotationsForExport(): WritableMap {
         val result = Arguments.createMap()
         val allStrokes = pageStrokes.getAllStrokes()
+        val allTexts = pageTexts.getAllTexts()
+        val allPages = allStrokes.keys + allTexts.keys
 
-        for ((page, strokes) in allStrokes) {
+        for (page in allPages) {
+            val pageMap = Arguments.createMap()
+
+            // Strokes
             val strokesArray = Arguments.createArray()
+            val strokes = allStrokes[page] ?: emptyList()
             for (stroke in strokes) {
                 val strokeMap = Arguments.createMap()
                 strokeMap.putString("id", stroke.id)
@@ -258,7 +365,6 @@ class DrawingController {
                 strokeMap.putDouble("width", stroke.width.toDouble())
                 strokeMap.putDouble("opacity", stroke.opacity.toDouble())
 
-                // Simplify and convert path
                 val simplifiedPath = simplifyPath(stroke.path)
                 val pathArray = Arguments.createArray()
                 for (point in simplifiedPath) {
@@ -268,10 +374,27 @@ class DrawingController {
                     pathArray.pushArray(pointArray)
                 }
                 strokeMap.putArray("path", pathArray)
-
                 strokesArray.pushMap(strokeMap)
             }
-            result.putArray(page.toString(), strokesArray)
+            pageMap.putArray("strokes", strokesArray)
+
+            // Texts
+            val textsArray = Arguments.createArray()
+            val texts = allTexts[page] ?: emptyList()
+            for (text in texts) {
+                val textMap = Arguments.createMap()
+                textMap.putString("color", text.color)
+                textMap.putDouble("fontSize", text.fontSize.toDouble())
+                textMap.putString("str", text.str)
+                val pointArray = Arguments.createArray()
+                pointArray.pushDouble(text.point[0].toDouble())
+                pointArray.pushDouble(text.point[1].toDouble())
+                textMap.putArray("point", pointArray)
+                textsArray.pushMap(textMap)
+            }
+            pageMap.putArray("text", textsArray)
+
+            result.putMap(page.toString(), pageMap)
         }
 
         return result

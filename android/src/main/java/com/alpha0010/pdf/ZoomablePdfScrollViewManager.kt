@@ -81,6 +81,16 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
         view.setStrokeOpacity(opacity)
     }
 
+    @ReactProp(name = "textColor")
+    fun setTextColor(view: ZoomablePdfScrollView, color: String?) {
+        view.setTextColor(color ?: "#0000FF")
+    }
+
+    @ReactProp(name = "textFontSize")
+    fun setTextFontSize(view: ZoomablePdfScrollView, size: Float) {
+        view.setTextFontSize(size)
+    }
+
     override fun getExportedCustomBubblingEventTypeConstants(): Map<String, Any> {
         return MapBuilder.builder<String, Any>()
             .put("onPdfError", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPdfError")))

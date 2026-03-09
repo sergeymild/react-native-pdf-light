@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
+import android.graphics.PointF
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -47,6 +48,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
 
     // Drawing controller (shared across pages)
     private val drawingController = DrawingController()
+    private lateinit var textAnnotationHandler: TextAnnotationHandler
 
     // PDF state
     private var mPdfRenderer: PdfRenderer? = null
@@ -80,6 +82,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     init {
         setBackgroundColor(mBackgroundColor)
         drawingController.delegate = this
+        textAnnotationHandler = TextAnnotationHandler(context)
 
         // Initialize cache
         val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
@@ -142,6 +145,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     // --- Setters ---
 
     fun setSource(source: String) {
+        Log.d("PagingPdfView", "setSource: same=${mSource == source}")
         if (mSource != source) {
             mSource = source
             // Defer loading if we don't have valid dimensions yet
@@ -154,7 +158,13 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     }
 
     fun setAnnotations(annotations: String?) {
-        mAnnotations = annotations ?: ""
+        val newAnnotations = annotations ?: ""
+        if (newAnnotations == mAnnotations) {
+            Log.d("PagingPdfView", "setAnnotations: SKIPPED (same value)")
+            return
+        }
+        Log.d("PagingPdfView", "setAnnotations: CHANGED, calling notifyDataSetChanged")
+        mAnnotations = newAnnotations
         mParsedAnnotations = parseAnnotations(mAnnotations)
         // Clear cache and reload to apply annotations
         mImageCache.evictAll()
@@ -162,18 +172,26 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     }
 
     fun setMinZoom(minZoom: Float) {
+        Log.d("PagingPdfView", "setMinZoom: $minZoom")
         mMinScale = minZoom.coerceAtLeast(0.5f)
     }
 
     fun setMaxZoom(maxZoom: Float) {
+        Log.d("PagingPdfView", "setMaxZoom: $maxZoom")
         mMaxScale = maxZoom.coerceAtLeast(1f)
     }
 
     fun setEdgeTapZone(zone: Float) {
+        Log.d("PagingPdfView", "setEdgeTapZone: $zone")
         mEdgeTapZone = zone.coerceIn(0f, 50f)
     }
 
     fun setPdfBackgroundColor(color: Int) {
+        if (color == mBackgroundColor) {
+            Log.d("PagingPdfView", "setPdfBackgroundColor: SKIPPED (same value)")
+            return
+        }
+        Log.d("PagingPdfView", "setPdfBackgroundColor: CHANGED, calling applyBackgroundColor")
         mBackgroundColor = color
         applyBackgroundColor()
     }
@@ -181,11 +199,16 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
     // --- Drawing setters ---
 
     fun setDrawingMode(mode: String) {
-        drawingController.drawingMode = DrawingMode.fromString(mode)
-        // Disable ViewPager swiping in drawing mode
-        mViewPager.isUserInputEnabled = drawingController.drawingMode == DrawingMode.VIEW
-        // Notify all pages to update their drawing mode
-        mAdapter.notifyDataSetChanged()
+        val newMode = DrawingMode.fromString(mode)
+        if (newMode == drawingController.drawingMode) return
+        if (newMode != DrawingMode.TEXT) {
+            textAnnotationHandler.commitTextInput()
+        }
+        drawingController.drawingMode = newMode
+        mViewPager.isUserInputEnabled = newMode == DrawingMode.VIEW
+        // Don't call notifyDataSetChanged — it causes resetState() which resets zoom.
+        // The drawingController is shared, so all pages already see the updated mode.
+        invalidateCurrentPage()
     }
 
     fun setStrokeColor(color: String) {
@@ -200,13 +223,24 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
         drawingController.strokeOpacity = opacity
     }
 
+    fun setTextColor(color: String) {
+        drawingController.textColor = color
+        textAnnotationHandler.textColor = color
+    }
+
+    fun setTextFontSize(size: Float) {
+        drawingController.textFontSize = size
+        textAnnotationHandler.textFontSize = size
+    }
+
     fun clearStrokes(page: Int) {
         if (page < 0) {
             drawingController.clearAllStrokes()
+            drawingController.clearAllTexts()
         } else {
             drawingController.clearStrokes(page)
+            drawingController.clearTexts(page)
         }
-        // Request redraw of current page
         invalidateCurrentPage()
     }
 
@@ -336,6 +370,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        Log.d("PagingPdfView", "onSizeChanged: w=$w, h=$h, oldw=$oldw, oldh=$oldh, previousWidth=$mPreviousWidth")
 
         if (w <= 0 || h <= 0) return
 
@@ -487,6 +522,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
                     mViewPager.isUserInputEnabled = !isZoomed
                 }
             }
+            pageView.rootOverlayContainer = this@PagingPdfView
             return PdfPageViewHolder(pageView)
         }
 
@@ -504,6 +540,7 @@ class PagingPdfView(context: Context, private val pdfMutex: Lock) : FrameLayout(
 
             // Drawing setup
             holder.pageView.drawingController = drawingController
+            holder.pageView.textAnnotationHandler = this@PagingPdfView.textAnnotationHandler
             holder.pageView.pageIndex = position
             holder.pageView.onPreviousPage = { scrollToBottom ->
                 Log.d("PagingPdfView", "onPreviousPage called, scrollToBottom=$scrollToBottom, position=$position")
@@ -608,7 +645,9 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
 
     // Drawing support
     var drawingController: DrawingController? = null
+    var textAnnotationHandler: TextAnnotationHandler? = null
     var pageIndex: Int = 0
+    var rootOverlayContainer: ViewGroup? = null  // PagingPdfView for drag labels
 
     private val scrollView: androidx.core.widget.NestedScrollView
     private val imageView: ImageView
@@ -871,22 +910,63 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         return true
     }
 
+    private fun setupTextHandler() {
+        val handler = textAnnotationHandler ?: return
+        handler.delegate = object : TextAnnotationHandlerDelegate {
+            override val textHandlerDrawingController: DrawingController get() = drawingController!!
+            override val textHandlerContentContainer: View get() = contentContainer
+            override val textHandlerHostView: ViewGroup get() = rootOverlayContainer ?: this@ZoomablePageView
+            override val textHandlerZoomScale: Float get() = scale
+
+            override fun textHandlerContentRectForPage(page: Int): RectF = drawingOverlay.contentRect
+            override fun textHandlerPageForPoint(pointInContent: PointF): Int = pageIndex
+            override fun textHandlerRedrawOverlay() {
+                drawingOverlay.post { drawingOverlay.invalidate() }
+            }
+        }
+        handler.screenToContentConverter = { ev ->
+            val contentX = (ev.x - offsetX) / scale
+            val contentY = ev.y / scale + scrollView.scrollY
+            PointF(contentX, contentY)
+        }
+        handler.contentToScreenConverter = { contentPoint ->
+            val screenX = contentPoint.x * scale + offsetX
+            val screenY = (contentPoint.y - scrollView.scrollY) * scale
+            PointF(screenX, screenY)
+        }
+    }
+
     private fun handleDrawingTouch(event: MotionEvent, controller: DrawingController) {
-        val contentRect = drawingOverlay.contentRect
-        if (contentRect.isEmpty) {
-            Log.d("ZoomablePageView", "handleDrawingTouch: contentRect is empty!")
+        // In text mode, delegate to text annotation handler
+        if (controller.drawingMode == DrawingMode.TEXT) {
+            setupTextHandler()
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    textAnnotationHandler?.handleTouchDown(event)
+                }
+                MotionEvent.ACTION_MOVE -> textAnnotationHandler?.handleTouchMove(event)
+                MotionEvent.ACTION_UP -> {
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    textAnnotationHandler?.handleTouchUp(event)
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    textAnnotationHandler?.handleTouchCancel()
+                }
+            }
             return
         }
 
-        // Convert touch coords from ZoomablePageView space to content space
-        // Account for: offsetX (horizontal pan), scale (zoom), scrollY (vertical scroll)
+        val contentRect = drawingOverlay.contentRect
+        if (contentRect.isEmpty) return
+
         val contentX = (event.x - offsetX) / scale
         val contentY = event.y / scale + scrollView.scrollY
 
-        // Convert to normalized coords (0-1)
         val normalizedX = (contentX - contentRect.left) / contentRect.width()
         val normalizedY = (contentY - contentRect.top) / contentRect.height()
-        val point = android.graphics.PointF(normalizedX, normalizedY)
+        val point = PointF(normalizedX, normalizedY)
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -902,7 +982,6 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
             }
         }
 
-        // Directly invalidate our own overlay (don't rely on delegate callback finding ViewHolder)
         drawingOverlay.post {
             drawingOverlay.invalidate()
         }
@@ -1048,6 +1127,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     fun resetState() {
+        Log.d("PagingPdfView", "resetState() called, current scale=$scale, minZoom=$minZoom", Exception("stack trace"))
         // Cancel any running animation
         zoomAnimator?.cancel()
         // Reset zoom and scroll state

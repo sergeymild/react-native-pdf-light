@@ -7,6 +7,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.util.Log
 import android.view.View
 import kotlin.math.hypot
@@ -43,6 +46,10 @@ class DrawingOverlayView(context: Context) : View(context) {
     private val fillPaint = Paint().apply {
         isAntiAlias = true
         style = Paint.Style.FILL
+    }
+
+    private val textPaint = TextPaint().apply {
+        isAntiAlias = true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -96,6 +103,9 @@ class DrawingOverlayView(context: Context) : View(context) {
                 }
             }
         }
+
+        // Draw text annotations
+        drawTexts(canvas, controller, pageIndex, contentRect)
     }
 
     private fun drawMultiPage(canvas: Canvas, controller: DrawingController) {
@@ -161,6 +171,9 @@ class DrawingOverlayView(context: Context) : View(context) {
                     }
                 }
             }
+
+            // Draw text annotations
+            drawTexts(canvas, controller, page, pageRect)
         }
     }
 
@@ -249,6 +262,35 @@ class DrawingOverlayView(context: Context) : View(context) {
         path.lineTo(lastX, lastY)
 
         return path
+    }
+
+    private fun drawTexts(canvas: Canvas, controller: DrawingController, page: Int, rect: RectF) {
+        val texts = controller.getTexts(page)
+        if (texts.isEmpty() || rect.isEmpty) return
+
+        for (text in texts) {
+            if (text.point.size < 2) continue
+
+            val color = try { Color.parseColor(text.color) } catch (e: Exception) { Color.BLUE }
+            textPaint.color = color
+            // In single-page mode parent scales, in multi-page mode we scale manually
+            val scale = if (multiPageMode) zoomScale else 1f
+            textPaint.textSize = text.fontSize * resources.displayMetrics.density * scale
+
+            val x = rect.left + text.point[0] * rect.width()
+            val y = rect.top + text.point[1] * rect.height()
+            val maxWidth = ((1f - text.point[0]) * rect.width() * scale).toInt().coerceAtLeast(1)
+
+            canvas.save()
+            canvas.translate(x, y)
+            val layout = StaticLayout.Builder.obtain(text.str, 0, text.str.length, textPaint, maxWidth)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(0f, 1f)
+                .setIncludePad(false)
+                .build()
+            layout.draw(canvas)
+            canvas.restore()
+        }
     }
 
     private fun parseColorWithOpacity(hexColor: String, opacity: Float): Int {

@@ -32,6 +32,7 @@ Both iOS (Swift) and Android (Kotlin).
 - `DrawingOverlayView.swift` — CATiledLayer overlay. Single/multi-page modes. Handles touch in draw modes.
 - `DrawingTypes.swift` — DrawingMode enum, DrawingStroke struct, PageStrokes container
 - `Common.swift` — PdfPageRenderer (2x retina), UIColor hex ext. Draws static annotations onto bitmap.
+- `TextAnnotationHandler.swift` — Reusable text input/drag handler. Delegate pattern.
 - `AnnotationPage.swift` — PositionedText, Stroke, AnnotationPage (Decodable)
 - `*Manager.swift` / `*.m` / `*.h` — RN bridge
 
@@ -39,8 +40,9 @@ Both iOS (Swift) and Android (Kotlin).
 - `ZoomablePdfScrollView.kt` — FrameLayout: RecyclerView + DrawingOverlayView (siblings). View scale transform zoom.
 - `PagingPdfView.kt` — ViewPager2. ZoomablePageView per page (NestedScrollView → ImageView + DrawingOverlayView).
 - `DrawablePdfView.kt` — Single-page with canvas transform zoom+drawing.
-- `DrawingOverlayView.kt` — drawSinglePage (Paging, inside scaled parent) and drawMultiPage (Zoomable, manual zoom calc).
-- `Common.kt` — DrawingMode, DrawingStroke, PageStrokes, DrawingController, PdfPageRenderer, parseAnnotations()
+- `DrawingOverlayView.kt` — drawSinglePage (Paging, inside scaled parent) and drawMultiPage (Zoomable, manual zoom calc). Also renders text annotations.
+- `Common.kt` — DrawingMode, DrawingStroke, DrawingText, PageStrokes, PageTexts, DrawingController, PdfPageRenderer, parseAnnotations()
+- `TextAnnotationHandler.kt` — Reusable text input/drag/hit-test handler. Delegate pattern + coordinate converter lambdas.
 - `AnnotationPage.kt` — Data classes (Serializable)
 - `*Manager.kt` / `PdfViewPackage.kt` — RN bridge
 
@@ -88,6 +90,34 @@ Both iOS (Swift) and Android (Kotlin).
 2. **Android RV paddingTop changes during zoom** — `recyclerPaddingTop` must be passed to overlay
 3. **Stroke width**: iOS divides by zoomScale, Android multipage multiplies by zoomScale, Android singlepage uses 1 (parent scales)
 4. **Static vs user annotations**: Completely separate. Static = baked in bitmap. User = live overlay.
+5. **Android PagingPdfView zoom reset**: `notifyDataSetChanged()` triggers `onBindViewHolder` → `resetState()` which resets zoom. Setters like `setDrawingMode`, `setAnnotations`, `setPdfBackgroundColor` must guard against redundant calls. `setDrawingMode` uses `invalidateCurrentPage()` instead of `notifyDataSetChanged`.
+6. **Android RN Yoga layout vs dynamic views**: Views added dynamically to RN-managed ViewGroups (PagingPdfView, ZoomablePdfScrollView) don't get measured/laid out by Yoga. Must manually call `measure()` + `layout()` on EditText and drag label.
+7. **iOS PagingPdfView zoom reset**: `updateImageViewFrame` must NOT set `contentContainer.frame` during active zoom (UIScrollView transform conflict). Use `bounds`/`center` and guard with `scrollView.zoomScale != 1.0`.
+
+## Text Annotation System
+
+### Architecture
+- **iOS**: `TextAnnotationHandler.swift` — delegate pattern, reused by both viewers
+- **Android**: `TextAnnotationHandler.kt` — delegate pattern + converter lambdas, reused by both viewers
+
+### Android TextAnnotationHandler
+- `TextAnnotationHandlerDelegate` interface: drawingController, contentContainer, hostView, zoomScale, contentRectForPage, pageForPoint, redrawOverlay
+- `screenToContentConverter` lambda: touch coords → content coords (accounts for zoom, scroll, padding)
+- `contentToScreenConverter` lambda: content coords → screen coords (inverse of above)
+- EditText for input: added to hostView, manually measured (`EXACTLY` width spec for non-zero width) and laid out
+- Drag label (TextView): added to hostView (PagingPdfView uses `rootOverlayContainer` to avoid ViewPager2 z-order issues), manually measured and laid out via `label.layout()`
+- Font size scaled by `zoomScale` for both EditText and drag label (they're outside the zoom transform hierarchy)
+
+### Coordinate converters per viewer (Android)
+| | screenToContent | contentToScreen |
+|---|---|---|
+| **Zoomable** | `x = (eventX - offsetX) / scale`, `y = eventY / scale - paddingTop + scrollOffset` | `x = contentX * scale + offsetX`, `y = (contentY - scrollOffset + paddingTop) * scale` |
+| **Paging** | `x = (eventX - offsetX) / scale`, `y = eventY / scale + scrollView.scrollY` | `x = contentX * scale + offsetX`, `y = (contentY - scrollView.scrollY) * scale` |
+
+### iOS TextAnnotationHandler
+- Drag uses `touch.location(in: contentContainer)` directly — avoids contentOffset dependency
+- `draggingTouchOffset` stored in hostView coords, converted via zoomScale on finish
+- Erase mode also deletes text annotations (hit-test in `DrawingController.eraseStroke`)
 
 ## Props
 - `source` — file path to PDF

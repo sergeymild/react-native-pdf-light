@@ -163,7 +163,7 @@ export function DrawingScreen({ onBack }: Props) {
       </View>
 
       <PdfViewer
-        viewerType="paging"
+        viewerType="zoomable"
         ref={pdfViewRef}
         source={source}
         minZoom={1}
