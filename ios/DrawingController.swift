@@ -215,6 +215,43 @@ class DrawingController {
                 }
             }
         }
+
+        // Check text annotations
+        let texts = pageTexts.getTexts(forPage: page)
+        for text in texts.reversed() {
+            guard text.point.count >= 2 else { continue }
+
+            let textX = text.point[0]
+            let textY = text.point[1]
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: text.fontSize)
+            ]
+            let attrStr = NSAttributedString(string: text.str, attributes: attributes)
+            let maxWidth = contentRect.width * (1 - textX)
+            let boundingRect = attrStr.boundingRect(
+                with: CGSize(width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin],
+                context: nil
+            )
+
+            let normalizedWidth = boundingRect.width / contentRect.width
+            let normalizedHeight = boundingRect.height / contentRect.height
+
+            let padding: CGFloat = 0.02
+            let hitRect = CGRect(
+                x: textX - padding,
+                y: textY - padding,
+                width: normalizedWidth + padding * 2,
+                height: normalizedHeight + padding * 2
+            )
+
+            if hitRect.contains(point) {
+                _ = pageTexts.removeText(withId: text.id, fromPage: page)
+                delegate?.drawingControllerNeedsRedraw(self)
+                return
+            }
+        }
     }
 
     // MARK: - Coordinate Conversion
