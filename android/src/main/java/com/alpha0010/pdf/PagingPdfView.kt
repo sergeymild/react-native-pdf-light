@@ -434,9 +434,17 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 val zone = classifyTapZone(e.x, width, edgeTapZone)
                 if (zone != TapZone.MIDDLE) return false
 
+                val currentScrollY = scrollView.scrollY
+                val contentY = e.y / scale + currentScrollY
+
+
                 if (isZoomed) {
+                    val targetScale = minZoom
+                    val newScrollY = (contentY - e.y / targetScale).toInt().coerceAtLeast(0)
+
+
                     pivotY = e.y
-                    animateZoomTo(minZoom, 0f, e.y)
+                    animateZoomTo(targetScale, 0f, e.y, newScrollY)
                 } else {
                     val targetScale = maxZoom
                     val contentX = (e.x - offsetX) / scale
@@ -446,8 +454,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
 
+                    val newScrollY = (contentY - e.y / targetScale).toInt().coerceAtLeast(0)
+
+
                     pivotY = e.y
-                    animateZoomTo(targetScale, targetOffsetX, e.y)
+                    animateZoomTo(targetScale, targetOffsetX, e.y, newScrollY)
                 }
                 return true
             }
@@ -670,12 +681,13 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, targetPivotY: Float = pivotY, duration: Long = 300L) {
+    private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, targetPivotY: Float = pivotY, targetScrollY: Int = -1, duration: Long = 300L) {
         zoomAnimator?.cancel()
 
         val startScale = scale
         val startOffsetX = offsetX
         val startPivotY = pivotY
+        val startScrollY = scrollView.scrollY
 
         zoomAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
@@ -685,6 +697,10 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                 scale = startScale + (targetScale - startScale) * fraction
                 offsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
                 pivotY = startPivotY + (targetPivotY - startPivotY) * fraction
+                if (targetScrollY >= 0) {
+                    val scrollY = startScrollY + ((targetScrollY - startScrollY) * fraction).toInt()
+                    scrollView.scrollTo(0, scrollY)
+                }
                 applyTransform()
                 updateScrollViewPadding()
                 onZoomChange?.invoke(scale)
