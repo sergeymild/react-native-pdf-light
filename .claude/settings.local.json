@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(find /Users/sergeigolishnikov/development/react-native-pdf-light/ios -name \"*.swift\" -type f -exec wc -l {} + | sort -n)",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/ios && grep -n \"class\\\\|struct\\\\|enum\\\\|protocol\" *.swift | head -60)",
+      "Bash(ls /Users/sergeigolishnikov/development/react-native-pdf-light/ios/*.swift | sort)",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example/ios && xcodebuild -workspace PdfViewExample.xcworkspace -scheme PdfViewExample -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' build 2>&1 | tail -40)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' build 2>&1 | tail -50)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' build 2>&1 | tail -50)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'id=DC94D53D-3C36-4514-B8B9-0BD5D58C4309' build 2>&1 | tail -60)",
+      "Bash(pod install:*)",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example && npm install 2>&1 | tail -10)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'id=DC94D53D-3C36-4514-B8B9-0BD5D58C4309' build 2>&1 | grep -E '\\(error:|BUILD\\)' | head -30)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'id=DC94D53D-3C36-4514-B8B9-0BD5D58C4309' build 2>&1 | grep -E '^/.*\\(error:\\)' | grep -v 'node_modules' | head -30)",
+      "Bash(xcodebuild -workspace PdfViewerExample.xcworkspace -scheme PdfViewerExample -sdk iphonesimulator -destination 'id=DC94D53D-3C36-4514-B8B9-0BD5D58C4309' build 2>&1 | grep -E '\\(BUILD SUCCEEDED|BUILD FAILED|PdfViewerBase|error:.*pdf\\)' | head -10)",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example && cat package.json | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('RN:', d.get\\('dependencies',{}\\).get\\('react-native','?'\\)\\); print\\('Hermes:', d.get\\('dependencies',{}\\).get\\('hermes-engine','?'\\)\\)\")",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light && node -e \"console.log\\(require\\('./node_modules/@babel/runtime/package.json'\\).version\\)\" && node -e \"console.log\\(require\\('./example/node_modules/@babel/runtime/package.json'\\).version\\)\" 2>&1)",
+      "Bash(head -20 /Users/sergeigolishnikov/development/react-native-pdf-light/node_modules/@babel/runtime/package.json | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exports:', 'exports' in d\\); print\\('type:', d.get\\('type','none'\\)\\)\" 2>/dev/null; echo \"---\"; head -5 /Users/sergeigolishnikov/development/react-native-pdf-light/node_modules/@babel/runtime/helpers/interopRequireDefault.js)",
+      "Bash(python3 -c \"\nimport json\nwith open\\('node_modules/@babel/runtime/package.json'\\) as f:\n    d = json.load\\(f\\)\nprint\\('version:', d.get\\('version'\\)\\)\nprint\\('type:', d.get\\('type', 'none'\\)\\)\nprint\\('has exports:', 'exports' in d\\)\nif 'exports' in d:\n    import json as j\n    print\\(j.dumps\\(d['exports'], indent=2\\)[:500]\\)\n\")",
+      "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example && npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output /tmp/test-bundle.js 2>&1 | tail -20)"
     ]
   }
 }

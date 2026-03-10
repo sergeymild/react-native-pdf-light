@@ -2,117 +2,29 @@ import UIKit
 
 // MARK: - ZoomablePdfScrollView (scrollable PDF viewer with global zoom using UICollectionView)
 
-class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, DrawingControllerDelegate, TextAnnotationHandlerDelegate {
+class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, TextAnnotationHandlerDelegate {
 
-    // MARK: - React Props
+    // MARK: - Additional Props (Zoomable-only)
 
-    @objc var source = "" { didSet { reloadPdf() } }
-
-    @objc var annotations = "" {
-        didSet {
-            parseAnnotations()
-            imageCache.removeAllObjects()
-            collectionView?.reloadData()
-        }
-    }
-
-    @objc var minZoom: CGFloat = 1.0 { didSet { updateZoomLimits() } }
-    @objc var maxZoom: CGFloat = 3.0 { didSet { updateZoomLimits() } }
-    @objc var edgeTapZone: CGFloat = 15.0
     @objc var pdfPaddingTop: CGFloat = 0.0 { didSet { updateContentInset() } }
     @objc var pdfPaddingBottom: CGFloat = 0.0 { didSet { updateContentInset() } }
-
-    @objc var pdfBackgroundColor: UIColor = UIColor(white: 0.2, alpha: 1.0) {
-        didSet { updateBackgroundColor() }
-    }
-
-    // MARK: - Drawing Props
-
-    @objc var drawingMode = "view" { didSet { updateDrawingMode() } }
-    @objc var strokeColor = "#000000" { didSet { drawingController.strokeColor = strokeColor } }
-    @objc var strokeWidth: CGFloat = 3.0 { didSet { drawingController.strokeWidth = strokeWidth } }
-    @objc var strokeOpacity: CGFloat = 1.0 { didSet { drawingController.strokeOpacity = strokeOpacity } }
-    @objc var strokes = "" { didSet { loadStrokes() } }
-
-    // MARK: - React Events
-
-    @objc var onPdfError: RCTDirectEventBlock?
-    @objc var onPdfLoadComplete: RCTDirectEventBlock? {
-        didSet {
-            // Send pending load complete event if PDF was loaded before callback was set
-            if let pending = pendingLoadCompleteEvent {
-                onPdfLoadComplete?(pending)
-                pendingLoadCompleteEvent = nil
-            }
-        }
-    }
-    @objc var onPageChange: RCTDirectEventBlock?
-    @objc var onZoomChange: RCTDirectEventBlock?
-    @objc var onTap: RCTDirectEventBlock?
-    @objc var onMiddleClick: RCTDirectEventBlock?
-
-    // Drawing events
-    @objc var onDrawingStart: RCTDirectEventBlock?
-    @objc var onDrawingEnd: RCTDirectEventBlock?
-
-    // Text annotation props
-    @objc var textColor = "#0000FF" { didSet { textAnnotationHandler.textColor = textColor } }
-    @objc var textFontSize: CGFloat = 16.0 { didSet { textAnnotationHandler.textFontSize = textFontSize } }
-
-    // Store load complete event if callback not yet set
-    private var pendingLoadCompleteEvent: [String: Any]?
 
     // MARK: - Private State
 
     private let scrollView = UIScrollView()
-    private let contentContainer = UIView() // Container for both collectionView and drawingOverlay
+    private let contentContainer = UIView()
     private var collectionView: UICollectionView!
-    private var pdfDocument: CGPDFDocument?
-    private var currentPage: Int = 0
-    private var isReloading = false
-    private var actualPageCount: Int = 0
-
-    // PDF dimensions (from first page)
-    private var pdfPageWidth: CGFloat = 0
-    private var pdfPageHeight: CGFloat = 0
-
-    // Image cache
-    private var imageCache = NSCache<NSNumber, UIImage>()
-
-    // Parsed annotations
-    private var parsedAnnotations: [AnnotationPage] = []
+    private let drawingOverlay = DrawingOverlayView()
 
     // Gesture recognizers
     private var doubleTapGesture: UITapGestureRecognizer!
     private var edgeTapGesture: UITapGestureRecognizer!
     private var middleTapGesture: UITapGestureRecognizer!
 
-    // Drawing controller
-    private let drawingController = DrawingController()
-    private var realDrawingMode = DrawingMode.view
-    private let drawingOverlay = DrawingOverlayView()
+    // MARK: - Setup
 
-    // Text annotation handler
-    private let textAnnotationHandler = TextAnnotationHandler()
-
-    // MARK: - Initialization
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupViews()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupViews()
-    }
-
-    private func setupViews() {
-        backgroundColor = pdfBackgroundColor
-        imageCache.countLimit = 10 // Cache up to 10 rendered pages
-
-        // Setup drawing controller
-        drawingController.delegate = self
+    override func setupViews() {
+        imageCache.countLimit = 10
 
         // Setup text annotation handler
         textAnnotationHandler.delegate = self
@@ -147,7 +59,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         collectionView.register(PdfPageCell.self, forCellWithReuseIdentifier: PdfPageCell.reuseId)
         contentContainer.addSubview(collectionView)
 
-        // Setup drawing overlay on top of collection view (inside same container so it zooms together)
+        // Setup drawing overlay on top of collection view
         drawingOverlay.drawingController = drawingController
         drawingOverlay.useNormalizedCoordinates = true
         drawingOverlay.multiPageMode = true
@@ -159,7 +71,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         doubleTapGesture.delegate = self
         addGestureRecognizer(doubleTapGesture)
 
-        // Edge tap - no delay (doesn't wait for double tap to fail)
+        // Edge tap - no delay
         edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
         edgeTapGesture.numberOfTapsRequired = 1
         edgeTapGesture.delegate = self
@@ -173,23 +85,50 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         addGestureRecognizer(middleTapGesture)
     }
 
+    // MARK: - Override Points
+
+    override func onPdfLoaded() {
+        collectionView.reloadData()
+        updateCollectionViewSize()
+    }
+
+    override func onAnnotationsChanged() {
+        collectionView?.reloadData()
+    }
+
+    override func updateZoomLimits() {
+        scrollView.minimumZoomScale = minZoom
+        scrollView.maximumZoomScale = maxZoom
+    }
+
+    override func onDrawingModeChanged(_ mode: DrawingMode) {
+        let isViewMode = mode == .view
+        scrollView.isScrollEnabled = isViewMode
+        scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
+        doubleTapGesture.isEnabled = isViewMode
+
+        // Full redraw to fix any stale CATiledLayer tiles
+        drawingOverlay.setNeedsDisplay()
+    }
+
+    override func redrawCurrentOverlay() {
+        drawingOverlay.setNeedsDisplay()
+    }
+
     // MARK: - Tap Handling
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-        // Toggle zoom: if zoomed in, reset to 1.0; otherwise zoom to maxZoom
         if scrollView.zoomScale > minZoom {
             UIView.animate(withDuration: 0.3) {
                 self.scrollView.zoomScale = self.minZoom
             }
         } else {
-            // Zoom to point
             let zoomRect = zoomRectForScale(maxZoom, center: gesture.location(in: contentContainer))
             scrollView.zoom(to: zoomRect, animated: true)
         }
     }
 
     @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
-        // Ignore edge taps in drawing modes
         guard drawingController.drawingMode == .view else { return }
 
         let tapLocation = gesture.location(in: self)
@@ -197,38 +136,30 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         let viewportHeight = bounds.height
         let scale = scrollView.zoomScale
 
-        // Account for content insets (including pdfPaddingTop/Bottom)
         let inset = scrollView.contentInset
         let minOffset = -inset.top
         let maxOffset = scrollView.contentSize.height * scale - viewportHeight + inset.bottom
 
-        let edgeRatio = edgeTapZone / 100.0
-        let leftEdge = bounds.width * edgeRatio
-
-        // Calculate page height
         guard pdfPageWidth > 0, pdfPageHeight > 0 else { return }
         let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth) * scale
 
-        // Check device orientation: portrait (height > width) or landscape (width >= height)
         let isPortraitMode = bounds.height > bounds.width
-
         let currentOffset = scrollView.contentOffset.y
+        let zone = classifyTapZone(point: tapLocation, in: bounds, edgeTapZone: edgeTapZone)
 
         if isPortraitMode {
-            // Portrait mode: scroll page by page, centering each page
             let centerY = (currentOffset + inset.top) + viewportHeight / 2
             let currentCenteredPage = Int(centerY / pageHeight)
 
-            if tapLocation.x < leftEdge {
-                // Left zone - go to previous page
+            switch zone {
+            case .left:
                 let targetPage = max(0, currentCenteredPage - 1)
                 let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top)
                 let clampedOffset = max(minOffset, min(maxOffset, targetOffset))
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
                 }
-            } else {
-                // Right zone - go to next page
+            case .right, .middle:
                 let targetPage = min(actualPageCount - 1, currentCenteredPage + 1)
                 let targetOffset = offsetToCenterPage(targetPage, pageHeight: pageHeight, viewportHeight: viewportHeight, insetTop: inset.top - pdfPaddingTop)
                 let clampedOffset = max(minOffset, min(maxOffset, targetOffset))
@@ -237,15 +168,13 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
                 }
             }
         } else {
-            // Landscape mode: scroll by viewport height
-            if tapLocation.x < leftEdge {
-                // Left zone - scroll up by viewport
+            switch zone {
+            case .left:
                 let newOffset = max(minOffset, currentOffset - viewportHeight)
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
                 }
-            } else {
-                // Right zone - scroll down by viewport
+            case .right, .middle:
                 let newOffset = min(maxOffset, currentOffset + viewportHeight)
                 UIView.animate(withDuration: 0.3) {
                     self.scrollView.contentOffset = CGPoint(x: 0, y: newOffset)
@@ -253,12 +182,10 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             }
         }
 
-        onTap?(["position": tapLocation.x < leftEdge ? "left" : "right"])
+        onTap?(["position": zone == .left ? "left" : "right"])
     }
 
     private func offsetToCenterPage(_ page: Int, pageHeight: CGFloat, viewportHeight: CGFloat, insetTop: CGFloat) -> CGFloat {
-        // Center of page N is at: page * pageHeight + pageHeight / 2
-        // To center it in viewport: centerOfPage - viewportHeight / 2 - insetTop
         let pageCenterY = CGFloat(page) * pageHeight + pageHeight / 2
         return pageCenterY - viewportHeight / 2 - insetTop
     }
@@ -281,8 +208,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     // MARK: - Layout
 
-    private var previousBoundsWidth: CGFloat = 0
-
     override func layoutSubviews() {
         super.layoutSubviews()
 
@@ -291,7 +216,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         // Clear cache and reset zoom if width changed (rotation)
         if bounds.width != previousBoundsWidth && previousBoundsWidth > 0 {
             imageCache.removeAllObjects()
-            // Reset zoom to 1.0 on rotation to avoid sizing issues
             scrollView.zoomScale = 1.0
             collectionView.reloadData()
         }
@@ -303,8 +227,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     private func updateCollectionViewSize() {
         guard bounds.width > 0, pdfPageWidth > 0, pdfPageHeight > 0 else { return }
 
-        // Don't update layout during zoom — UIScrollView manages contentContainer's transform
-        // Setting frame when transform != identity is undefined behavior
+        // Don't update layout during zoom
         if scrollView.zoomScale != 1.0 {
             updateContentInset()
             return
@@ -312,110 +235,35 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
         let viewWidth = bounds.width
         let pageHeight = viewWidth * (pdfPageHeight / pdfPageWidth)
-        let totalHeight = (pageHeight) * CGFloat(actualPageCount)
+        let totalHeight = pageHeight * CGFloat(actualPageCount)
 
-        // Update container bounds (not frame — frame is undefined when transform is active)
         contentContainer.bounds = CGRect(x: 0, y: 0, width: viewWidth, height: totalHeight)
         contentContainer.center = CGPoint(x: viewWidth / 2, y: totalHeight / 2)
 
-        // Collection view fills the container
         collectionView.frame = contentContainer.bounds
         scrollView.contentSize = CGSize(width: viewWidth, height: totalHeight)
 
-        // Update drawing overlay to match container
         drawingOverlay.frame = contentContainer.bounds
         drawingOverlay.pageCount = actualPageCount
         drawingOverlay.pageWidth = viewWidth
         drawingOverlay.pageHeight = pageHeight
         drawingOverlay.setNeedsDisplay()
 
-        // Invalidate layout to recalculate cell sizes
         collectionView.collectionViewLayout.invalidateLayout()
 
         updateContentInset()
     }
 
-    private func updateLayout() {
-        if let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
-            layout.minimumLineSpacing = 0
-        }
-        updateCollectionViewSize()
-    }
-
     private func updateContentInset() {
-        let scrollViewSize = scrollView.bounds.size
-        let contentSize = scrollView.contentSize
-        let scale = scrollView.zoomScale
-
-        let scaledContentWidth = contentSize.width * scale
-        let scaledContentHeight = contentSize.height * scale
-
-        let horizontalInset = max(0, (scrollViewSize.width - scaledContentWidth) / 2)
-        let verticalInset = max(0, (scrollViewSize.height - scaledContentHeight) / 2)
-
-        scrollView.contentInset = UIEdgeInsets(
-            top: verticalInset + pdfPaddingTop,
-            left: horizontalInset,
-            bottom: verticalInset + pdfPaddingBottom,
-            right: horizontalInset
+        scrollView.contentInset = centeredContentInset(
+            for: scrollView,
+            extraTop: pdfPaddingTop,
+            extraBottom: pdfPaddingBottom
         )
     }
 
-    private func updateZoomLimits() {
-        scrollView.minimumZoomScale = minZoom
-        scrollView.maximumZoomScale = maxZoom
-    }
+    // MARK: - Page Detection
 
-    private func updateBackgroundColor() {
-        backgroundColor = pdfBackgroundColor
-    }
-
-    // MARK: - Drawing Mode
-
-    private func updateDrawingMode() {
-        guard let mode = DrawingMode(rawValue: drawingMode) else {
-            realDrawingMode = .view
-            drawingController.drawingMode = .view
-            return
-        }
-        realDrawingMode = mode
-        drawingController.drawingMode = mode
-
-        // Dismiss text input when switching modes
-        if mode != .text {
-            textAnnotationHandler.commitTextInput()
-        }
-
-        // Disable all scroll/zoom gestures in drawing modes (draw, erase, highlight, text)
-        let isViewMode = mode == .view
-        scrollView.isScrollEnabled = isViewMode
-        scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
-        doubleTapGesture.isEnabled = isViewMode
-
-        // Full redraw to fix any stale CATiledLayer tiles
-        drawingOverlay.setNeedsDisplay()
-    }
-
-    private func loadStrokes() {
-        guard !strokes.isEmpty else {
-            drawingController.clearAllStrokes()
-            drawingOverlay.setNeedsDisplay()
-            return
-        }
-
-        do {
-            let data = strokes.data(using: .utf8)!
-            let pageStrokes = try JSONDecoder().decode(PageStrokes.self, from: data)
-            drawingController.setAllStrokes(pageStrokes)
-            drawingOverlay.setNeedsDisplay()
-        } catch {
-            onPdfError?(["message": "Failed to parse strokes: \(error.localizedDescription)"])
-        }
-    }
-
-    // MARK: - Page Detection for Drawing
-
-    /// Determine which page a point in the collection view belongs to
     private func pageIndexForPoint(_ point: CGPoint) -> Int {
         guard pdfPageWidth > 0, pdfPageHeight > 0, actualPageCount > 0 else { return 0 }
 
@@ -424,7 +272,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         return max(0, min(pageIndex, actualPageCount - 1))
     }
 
-    /// Get the content rect for a specific page (in collection view coordinates)
     private func contentRectForPage(_ page: Int) -> CGRect {
         guard pdfPageWidth > 0, pdfPageHeight > 0 else { return .zero }
 
@@ -435,36 +282,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             width: bounds.width,
             height: pageHeight
         )
-    }
-
-    // MARK: - DrawingControllerDelegate
-
-    func drawingController(_ controller: DrawingController, didAddStroke stroke: DrawingStroke, onPage page: Int) {
-        // Strokes are stored natively, no sync needed
-    }
-
-    func drawingController(_ controller: DrawingController, didRemoveStroke strokeId: String, onPage page: Int) {
-        // Strokes are stored natively, no sync needed
-    }
-
-    func drawingController(_ controller: DrawingController, strokesCleared onPage: Int) {
-        // Strokes are stored natively, no sync needed
-    }
-
-    func drawingControllerDidStartDrawing(_ controller: DrawingController) {
-        onDrawingStart?([:])
-    }
-
-    func drawingControllerDidEndDrawing(_ controller: DrawingController) {
-        onDrawingEnd?([:])
-    }
-
-    func drawingControllerNeedsRedraw(_ controller: DrawingController) {
-        drawingOverlay.setNeedsDisplay()
-    }
-
-    func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
-        // Handled by TextAnnotationHandler via touch interception
     }
 
     // MARK: - TextAnnotationHandlerDelegate
@@ -486,58 +303,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         drawingOverlay.setNeedsDisplay()
     }
 
-    // MARK: - PDF Loading
-
-    private func reloadPdf() {
-        guard !source.isEmpty, !isReloading else { return }
-        isReloading = true
-
-        // Clear cache
-        imageCache.removeAllObjects()
-        pdfDocument = nil
-
-        // Load PDF document
-        let url = URL(fileURLWithPath: source)
-        guard let document = CGPDFDocument(url as CFURL) else {
-            onPdfError?(["message": "Failed to open PDF: \(source)"])
-            isReloading = false
-            return
-        }
-
-        pdfDocument = document
-
-        // Get dimensions from first page
-        if let firstPage = document.page(at: 1) {
-            let pageBounds = firstPage.getBoxRect(.cropBox)
-            if firstPage.rotationAngle % 180 == 90 {
-                pdfPageWidth = pageBounds.height
-                pdfPageHeight = pageBounds.width
-            } else {
-                pdfPageWidth = pageBounds.width
-                pdfPageHeight = pageBounds.height
-            }
-        }
-
-        actualPageCount = document.numberOfPages
-
-        isReloading = false
-        collectionView.reloadData()
-        updateCollectionViewSize()
-
-        // Notify load complete
-        let loadCompleteEvent: [String: Any] = [
-            "width": pdfPageWidth,
-            "height": pdfPageHeight,
-            "pageCount": actualPageCount
-        ]
-        if let callback = onPdfLoadComplete {
-            callback(loadCompleteEvent)
-        } else {
-            // Store for later when callback is set (race condition workaround)
-            pendingLoadCompleteEvent = loadCompleteEvent
-        }
-    }
-
     // MARK: - UICollectionViewDataSource
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -547,15 +312,13 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PdfPageCell.reuseId, for: indexPath) as! PdfPageCell
 
-        // Check cache first
         if let cachedImage = imageCache.object(forKey: NSNumber(value: indexPath.item)) {
             cell.setImage(cachedImage)
         } else {
-            cell.setImage(nil) // Clear while loading
+            cell.setImage(nil)
             renderPage(at: indexPath.item) { [weak self] image in
                 guard let self, let image else { return }
                 self.imageCache.setObject(image, forKey: NSNumber(value: indexPath.item))
-                // Only update if cell is still visible for this index
                 if let currentCell = self.collectionView.cellForItem(at: indexPath) as? PdfPageCell {
                     currentCell.setImage(image)
                 }
@@ -585,9 +348,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         updateContentInset()
-        // Update drawing overlay zoom scale for consistent stroke width
         drawingOverlay.zoomScale = scrollView.zoomScale
-        // Full CATiledLayer redraw — partial invalidation leaves missing tiles when zooming out
         drawingOverlay.setNeedsDisplay()
         onZoomChange?(["scale": scrollView.zoomScale])
     }
@@ -600,12 +361,10 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         guard bounds.width > 0, pdfPageWidth > 0, pdfPageHeight > 0, actualPageCount > 0 else { return }
 
         let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
-        let pageWithSpacing = pageHeight
         let scale = scrollView.zoomScale
 
-        // Calculate center point in content coordinates
         let centerY = (scrollView.contentOffset.y + scrollView.bounds.height / 2) / scale
-        let newPage = Int(centerY / pageWithSpacing)
+        let newPage = Int(centerY / pageHeight)
         let clampedPage = max(0, min(newPage, actualPageCount - 1))
 
         if clampedPage != currentPage {
@@ -614,108 +373,40 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         }
     }
 
-    // MARK: - Annotations
-
-    private func parseAnnotations() {
-        guard !annotations.isEmpty,
-              let data = annotations.data(using: .utf8) else {
-            parsedAnnotations = []
-            return
-        }
-
-        do {
-            parsedAnnotations = try JSONDecoder().decode([AnnotationPage].self, from: data)
-        } catch {
-            parsedAnnotations = []
-        }
-    }
-
-    // MARK: - PDF Rendering
-
-    private func renderPage(at index: Int, completion: @escaping (UIImage?) -> Void) {
-        guard let document = pdfDocument else {
-            completion(nil)
-            return
-        }
-
-        let annotation = index < parsedAnnotations.count ? parsedAnnotations[index] : nil
-
-        PdfPageRenderer.renderPage(
-            document: document,
-            pageIndex: index,
-            viewWidth: bounds.width,
-            pdfPageWidth: pdfPageWidth,
-            pdfPageHeight: pdfPageHeight,
-            annotation: annotation,
-            completion: completion
-        )
-    }
-
     // MARK: - Public Commands
 
-    func resetZoom() {
+    override func resetZoom() {
         UIView.animate(withDuration: 0.3) {
             self.scrollView.zoomScale = 1.0
         }
     }
 
-    func scrollToPage(_ page: Int, animated: Bool) {
+    override func scrollToPage(_ page: Int, animated: Bool) {
         guard page >= 0, page < actualPageCount else { return }
 
         let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
-        let pageWithSpacing = pageHeight
-        let yOffset = CGFloat(page) * pageWithSpacing
+        let yOffset = CGFloat(page) * pageHeight
 
         scrollView.setContentOffset(CGPoint(x: 0, y: yOffset * scrollView.zoomScale), animated: animated)
-    }
-
-    func clearStrokes(page: Int) {
-        if page >= 0 {
-            drawingController.clearStrokes(forPage: page)
-            drawingController.clearTexts(forPage: page)
-        } else {
-            // Clear all pages
-            drawingController.clearAllStrokes()
-            drawingController.clearAllTexts()
-        }
-        drawingOverlay.setNeedsDisplay()
-    }
-
-    /// Get all annotations (strokes) from all pages
-    func getAnnotations() -> [String: Any] {
-        return drawingController.getAnnotationsForExport()
-    }
-
-    // MARK: - Cleanup
-
-    func clearCache() {
-        imageCache.removeAllObjects()
     }
 
     // MARK: - Touch Handling for Drawing
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        // In view mode, use default behavior
         guard realDrawingMode != .view else {
             return super.hitTest(point, with: event)
         }
 
-        // In drawing mode, only intercept if point is within bounds
-        guard bounds.contains(point) else {
-            return nil
-        }
+        guard bounds.contains(point) else { return nil }
 
-        // Check if any subview wants this touch (could be a button or other control)
-        // We only intercept touches on the scrollView/content area, not on any overlay controls
         for subview in subviews.reversed() {
-            if subview == scrollView { continue } // We'll handle scrollView specially
+            if subview == scrollView { continue }
             let pointInSubview = convert(point, to: subview)
             if let hitView = subview.hitTest(pointInSubview, with: event) {
-                return hitView // Let the subview handle it
+                return hitView
             }
         }
 
-        // Touch is in our bounds and no subview claimed it - intercept for drawing
         return self
     }
 
@@ -725,7 +416,6 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
             return
         }
 
-        // In text mode, delegate to handler
         if realDrawingMode == .text {
             if textAnnotationHandler.handleTouchBegan(touch) { return }
         }
@@ -799,8 +489,7 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
 
     // MARK: - UIGestureRecognizerDelegate
 
-  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Disable all tap gestures in drawing mode
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if realDrawingMode != .view {
             if gestureRecognizer === edgeTapGesture ||
                gestureRecognizer === middleTapGesture ||
@@ -810,21 +499,14 @@ class ZoomablePdfScrollView: UIView, UIScrollViewDelegate, UICollectionViewDataS
         }
 
         let tapLocation = gestureRecognizer.location(in: self)
-        let edgeRatio = edgeTapZone / 100.0
-        let leftEdge = bounds.width * edgeRatio
-        let rightEdge = bounds.width * (1.0 - edgeRatio)
+        let zone = classifyTapZone(point: tapLocation, in: bounds, edgeTapZone: edgeTapZone)
 
-        let isInEdgeZone = tapLocation.x < leftEdge || tapLocation.x > rightEdge
-        let isInMiddleZone = tapLocation.x >= leftEdge && tapLocation.x <= rightEdge
-
-        // Edge tap only in edge zones AND when not zoomed AND in view mode
         if gestureRecognizer === edgeTapGesture {
-            return isInEdgeZone && scrollView.zoomScale <= minZoom + 0.01 && drawingController.drawingMode == .view
+            return zone != .middle && scrollView.zoomScale <= minZoom + 0.01 && drawingController.drawingMode == .view
         }
 
-        // Middle tap and double tap only in middle zone
         if gestureRecognizer === middleTapGesture || gestureRecognizer === doubleTapGesture {
-            return isInMiddleZone
+            return zone == .middle
         }
 
         return true
