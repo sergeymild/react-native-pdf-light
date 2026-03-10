@@ -5,56 +5,25 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import android.util.Log
-import android.util.LruCache
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
-import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.facebook.react.bridge.Arguments
-import com.facebook.react.bridge.ReactContext
 import com.facebook.react.uimanager.PixelUtil
-import com.facebook.react.uimanager.events.RCTEventEmitter
 import kotlinx.coroutines.*
-import java.io.File
-import java.io.FileNotFoundException
 import java.util.concurrent.locks.Lock
-import kotlin.concurrent.withLock
 
 /**
  * Zoomable scrollable PDF viewer using RecyclerView for virtualization.
  */
 @SuppressLint("ViewConstructor")
-class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : FrameLayout(context), DrawingControllerDelegate {
-
-    // Props
-    private var mSource = ""
-    private var mAnnotations = ""
-    private var mParsedAnnotations: List<AnnotationPage> = emptyList()
-    private var mMinScale = 1f
-    private var mMaxScale = 3f
-    private var mEdgeTapZone = 15f
-    private var mPaddingTop = 0
-    private var mPaddingBottom = 0
-    private var mBackgroundColor = Color.DKGRAY
-
-    // Drawing controller
-    private val drawingController = DrawingController()
-    private lateinit var textAnnotationHandler: TextAnnotationHandler
-
-    // PDF state
-    private var mPdfRenderer: PdfRenderer? = null
-    private var mFileDescriptor: ParcelFileDescriptor? = null
-    private var mPdfPageWidth = 0
-    private var mPdfPageHeight = 0
-    private var mActualPageCount = 0
+class ZoomablePdfScrollView(context: Context, pdfMutex: Lock) : PdfViewerBase(context, pdfMutex) {
 
     // Zoom state
     private var mScale = 1f
@@ -62,45 +31,24 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     private var mOffsetY = 0f
     private var mPivotY = 0f
 
+    // Zoomable-only props
+    private var mPaddingTop = 0
+    private var mPaddingBottom = 0
+
     // Views
     private val mRecyclerView: RecyclerView
     private val mAdapter: PdfPageAdapter
     private val mDrawingOverlay: DrawingOverlayView
-
-    // Image cache (LruCache with max 10MB or 10 pages)
-    private val mImageCache: LruCache<Int, Bitmap>
 
     // Gesture detectors
     private val mScaleDetector: ScaleGestureDetector
     private val mGestureDetector: GestureDetector
     private val mPanGestureDetector: GestureDetector
 
-    // Current page tracking
-    private var mCurrentPage = 0
-
-    // Track width for rotation handling
-    private var mPreviousWidth = 0
-
-
-    // Coroutine scope for rendering
-    private val renderScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
     // Zoom animation
     private var zoomAnimator: ValueAnimator? = null
 
     init {
-        drawingController.delegate = this
-        textAnnotationHandler = TextAnnotationHandler(context)
-
-        // Initialize cache (10MB max)
-        val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-        val cacheSize = maxMemory / 8 // Use 1/8th of available memory
-        mImageCache = object : LruCache<Int, Bitmap>(cacheSize) {
-            override fun sizeOf(key: Int, bitmap: Bitmap): Int {
-                return bitmap.byteCount / 1024
-            }
-        }
-
         // Setup RecyclerView
         mRecyclerView = RecyclerView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
@@ -122,7 +70,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         addView(mRecyclerView)
         addView(mDrawingOverlay)
 
-        // Setup text annotation handler (after views are initialized)
+        // Setup text annotation handler
         textAnnotationHandler.delegate = object : TextAnnotationHandlerDelegate {
             override val textHandlerDrawingController: DrawingController get() = drawingController
             override val textHandlerContentContainer: View get() = mRecyclerView
@@ -162,7 +110,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         // Setup scale gesture detector
         mScaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                zoomAnimator?.cancel() // Cancel any running animation
+                zoomAnimator?.cancel()
                 return true
             }
 
@@ -171,30 +119,24 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 val newScale = (mScale * scaleFactor).coerceIn(mMinScale, mMaxScale)
 
                 if (newScale != mScale) {
-                    // Get focus point (between fingers) in screen coordinates
                     val focusX = detector.focusX
                     val focusY = detector.focusY
 
-                    // Calculate the point in content coordinates before scale
                     val currentScrollY = mRecyclerView.computeVerticalScrollOffset()
                     val oldPaddingTop = mRecyclerView.paddingTop
                     val contentX = (focusX - mOffsetX) / mScale
                     val contentY = focusY / mScale - oldPaddingTop + currentScrollY
 
-                    // Update scale
                     mScale = newScale
                     mPivotY = focusY
 
-                    // Calculate new horizontal offset to keep focus point stationary
                     mOffsetX = focusX - contentX * mScale
 
-                    // Calculate what the new paddingTop will be after applyTransform
                     val newZoomExtraTop = if (mScale > 1.01f && height > 0) {
                         (height * (mScale - 1) * 0.05f).toInt()
                     } else 0
                     val newPaddingTop = mPaddingTop + newZoomExtraTop
 
-                    // Adjust scroll to keep vertical focus point stationary
                     val newScrollY = (contentY - focusY / mScale + newPaddingTop).toInt().coerceAtLeast(0)
                     val scrollDelta = newScrollY - currentScrollY
                     if (scrollDelta != 0) {
@@ -203,8 +145,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
                     constrainOffset()
                     applyTransform()
-
-                    onZoomChange()
+                    onZoomChange(mScale)
                 }
                 return true
             }
@@ -212,42 +153,20 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
         // Setup gesture detector for taps
         mGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                Log.d("PDF_TAP", "onDown: x=${e.x}, width=$width")
-                return true // Must return true to receive other events
-            }
+            override fun onDown(e: MotionEvent): Boolean = true
 
-            // onSingleTapUp fires immediately - used for edge taps
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                val tapX = e.x
-                val edgeRatio = mEdgeTapZone / 100f
-                val leftEdge = width * edgeRatio
-                val rightEdge = width * (1f - edgeRatio)
-
-                Log.d("PDF_TAP", "onSingleTapUp: tapX=$tapX, leftEdge=$leftEdge, rightEdge=$rightEdge")
-
-                // Only handle edge taps here (instant response)
-                if (tapX < leftEdge || tapX > rightEdge) {
-                    Log.d("PDF_TAP", "onSingleTapUp: EDGE TAP detected!")
-                    handleEdgeTap(tapX)
+                val zone = classifyTapZone(e.x, width, mEdgeTapZone)
+                if (zone != TapZone.MIDDLE) {
+                    handleEdgeTap(e.x)
                     return true
                 }
-                Log.d("PDF_TAP", "onSingleTapUp: middle zone, skipping")
                 return false
             }
 
-            // onSingleTapConfirmed fires after double-tap timeout - used for middle zone
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                val tapX = e.x
-                val edgeRatio = mEdgeTapZone / 100f
-                val leftEdge = width * edgeRatio
-                val rightEdge = width * (1f - edgeRatio)
-
-                Log.d("PDF_TAP", "onSingleTapConfirmed: tapX=$tapX")
-
-                // Only handle middle zone here
-                if (tapX >= leftEdge && tapX <= rightEdge) {
-                    Log.d("PDF_TAP", "onSingleTapConfirmed: MIDDLE TAP!")
+                val zone = classifyTapZone(e.x, width, mEdgeTapZone)
+                if (zone == TapZone.MIDDLE) {
                     onMiddleClick()
                     return true
                 }
@@ -255,43 +174,24 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                Log.d("PDF_TAP", "onDoubleTap: x=${e.x}")
-                // Only handle double tap in middle zone
-                val tapX = e.x
-                val tapY = e.y
-                val edgeRatio = mEdgeTapZone / 100f
-                val leftEdge = width * edgeRatio
-                val rightEdge = width * (1f - edgeRatio)
-
-                if (tapX < leftEdge || tapX > rightEdge) {
-                    return false
-                }
+                val zone = classifyTapZone(e.x, width, mEdgeTapZone)
+                if (zone != TapZone.MIDDLE) return false
 
                 if (mScale > mMinScale) {
-                    // Reset zoom with animation
-                    // Set pivot to tap point and keep it during animation
-                    mPivotY = tapY
-                    animateZoomTo(mMinScale, 0f, 0, tapY)
+                    mPivotY = e.y
+                    animateZoomTo(mMinScale, 0f, 0, e.y)
                 } else {
-                    // Zoom to maxZoom at tap location with animation
                     val targetScale = mMaxScale
+                    val contentX = (e.x - mOffsetX) / mScale
+                    var targetOffsetX = e.x - contentX * targetScale
 
-                    // Calculate content point under tap (horizontal)
-                    val contentX = (tapX - mOffsetX) / mScale
-
-                    // Calculate new horizontal offset to keep tap point stationary
-                    var targetOffsetX = tapX - contentX * targetScale
-
-                    // Constrain target offset
                     val scaledWidth = width * targetScale
                     val minOffsetX = width - scaledWidth
                     targetOffsetX = targetOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
 
-                    // Set pivot to tap point and keep it during animation
-                    mPivotY = tapY
-                    animateZoomTo(targetScale, targetOffsetX, 0, tapY)
+                    mPivotY = e.y
+                    animateZoomTo(targetScale, targetOffsetX, 0, e.y)
                 }
-
                 return true
             }
         })
@@ -300,8 +200,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mPanGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (mScale <= 1f) return false
-
-                // Only handle horizontal pan, let RecyclerView handle vertical
                 mOffsetX -= distanceX
                 constrainOffset()
                 applyTransform()
@@ -313,7 +211,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
-                // Update drawing overlay scroll offset and padding
                 mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
                 mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
                 mDrawingOverlay.invalidate()
@@ -321,17 +218,67 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         })
     }
 
+    // MARK: - Override Points
+
+    override fun onPdfLoaded() {
+        mAdapter.notifyDataSetChanged()
+        updateDrawingOverlay()
+    }
+
+    override fun onAnnotationsChanged() {
+        mAdapter.notifyDataSetChanged()
+    }
+
+    override fun onDrawingModeChanged(mode: DrawingMode) {
+        updateDrawingOverlay()
+        mDrawingOverlay.bringToFront()
+    }
+
+    override fun redrawOverlay() {
+        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        mDrawingOverlay.invalidate()
+    }
+
+    override fun setMinZoom(minZoom: Float) {
+        super.setMinZoom(minZoom)
+        if (mScale < mMinScale) {
+            mScale = mMinScale
+            constrainOffset()
+            applyTransform()
+        }
+    }
+
+    override fun setMaxZoom(maxZoom: Float) {
+        super.setMaxZoom(maxZoom)
+        if (mScale > mMaxScale) {
+            mScale = mMaxScale
+            constrainOffset()
+            applyTransform()
+        }
+    }
+
+    // MARK: - Zoomable-only Props
+
+    fun setPdfPaddingTop(padding: Float) {
+        mPaddingTop = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
+        updateRecyclerViewPadding()
+    }
+
+    fun setPdfPaddingBottom(padding: Float) {
+        mPaddingBottom = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
+        updateRecyclerViewPadding()
+    }
+
+    // MARK: - Transform
+
     private fun constrainOffset() {
         if (mScale <= 1f) {
             mOffsetX = 0f
             return
         }
-
         val scaledWidth = width * mScale
-        val maxOffsetX = 0f
         val minOffsetX = width - scaledWidth
-
-        mOffsetX = mOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), maxOffsetX)
+        mOffsetX = mOffsetX.coerceIn(minOffsetX.coerceAtMost(0f), 0f)
     }
 
     private fun applyTransform() {
@@ -341,43 +288,64 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         mRecyclerView.pivotX = 0f
         mRecyclerView.pivotY = 0f
 
-        // Don't apply scale or translationX to drawing overlay - it handles zoom internally
         mDrawingOverlay.zoomScale = mScale
         mDrawingOverlay.offsetX = mOffsetX
         mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
         mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
         mDrawingOverlay.invalidate()
 
-        // Update padding to allow scrolling to see all zoomed content
         updateRecyclerViewPadding()
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        // Always intercept to handle taps and gestures
-        return true
+    private fun updateRecyclerViewPadding() {
+        val zoomExtraTop = if (mScale > 1.01f && height > 0) {
+            (height * (mScale - 1) * 0.05f).toInt()
+        } else 0
+        val zoomExtraBottom = if (mScale > 1.01f && height > 0) {
+            (height * (mScale - 1) * 0.25f).toInt()
+        } else 0
+
+        val newTopPadding = mPaddingTop + zoomExtraTop
+        val newBottomPadding = mPaddingBottom + zoomExtraBottom
+
+        if (mRecyclerView.paddingTop != newTopPadding || mRecyclerView.paddingBottom != newBottomPadding) {
+            mRecyclerView.setPadding(0, newTopPadding, 0, newBottomPadding)
+            mRecyclerView.clipToPadding = false
+            mRecyclerView.requestLayout()
+        }
     }
+
+    private fun updateDrawingOverlay() {
+        val pageHeightPx = getPageHeight()
+        if (pageHeightPx <= 0) return
+
+        mDrawingOverlay.pageCount = mActualPageCount
+        mDrawingOverlay.pageHeight = pageHeightPx.toFloat()
+        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
+        mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
+        mDrawingOverlay.zoomScale = mScale
+        mDrawingOverlay.invalidate()
+    }
+
+    // MARK: - Touch Handling
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = true
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // Handle drawing mode
         if (drawingController.drawingMode != DrawingMode.VIEW) {
             handleDrawingTouch(event)
             return true
         }
 
-        // Always process scale gestures
         mScaleDetector.onTouchEvent(event)
-
-        // Process taps (edge taps via onSingleTapUp, middle via onSingleTapConfirmed/onDoubleTap)
         mGestureDetector.onTouchEvent(event)
 
-        // Handle pan when zoomed
         if (mScale > 1f) {
             mPanGestureDetector.onTouchEvent(event)
         }
 
-        // Forward scroll events to RecyclerView
         if (event.pointerCount == 1 && !mScaleDetector.isInProgress) {
             mRecyclerView.onTouchEvent(event)
         }
@@ -386,14 +354,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
     }
 
     private fun handleDrawingTouch(event: MotionEvent) {
-        // In text mode, delegate to text annotation handler
         if (drawingController.drawingMode == DrawingMode.TEXT) {
-            Log.d("PDFText", "ZoomableTouch: action=${event.action}, xy=(${event.x}, ${event.y}), scale=$mScale")
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    val result = textAnnotationHandler.handleTouchDown(event)
-                    Log.d("PDFText", "ZoomableTouchDown result=$result, hasInput=${textAnnotationHandler.hasActiveTextInput}, isDragging=${textAnnotationHandler.isDraggingText}")
-                }
+                MotionEvent.ACTION_DOWN -> textAnnotationHandler.handleTouchDown(event)
                 MotionEvent.ACTION_MOVE -> textAnnotationHandler.handleTouchMove(event)
                 MotionEvent.ACTION_UP -> textAnnotationHandler.handleTouchUp(event)
                 MotionEvent.ACTION_CANCEL -> textAnnotationHandler.handleTouchCancel()
@@ -401,11 +364,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             return
         }
 
-        // Calculate which page we're on and normalize coordinates
         val pageHeightPx = getPageHeight()
         if (pageHeightPx <= 0) return
 
-        // Ensure overlay is set up before handling touch
         if (mDrawingOverlay.pageCount == 0 || mDrawingOverlay.pageHeight <= 0f) {
             updateDrawingOverlay()
         }
@@ -426,256 +387,92 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         val contentRect = RectF(0f, pageTop.toFloat(), width.toFloat(), (pageTop + pageHeightPx).toFloat())
 
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                drawingController.handleTouchBegan(point, pageIndex, contentRect)
-            }
-            MotionEvent.ACTION_MOVE -> {
-                drawingController.handleTouchMoved(point, pageIndex, contentRect)
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                drawingController.handleTouchEnded(pageIndex)
-            }
+            MotionEvent.ACTION_DOWN -> drawingController.handleTouchBegan(point, pageIndex, contentRect)
+            MotionEvent.ACTION_MOVE -> drawingController.handleTouchMoved(point, pageIndex, contentRect)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> drawingController.handleTouchEnded(pageIndex)
         }
     }
 
-    // --- Setters ---
+    // MARK: - Edge Tap Handling
 
-    fun setSource(source: String) {
-        if (mSource != source) {
-            mSource = source
-            reloadPdf()
-        }
-    }
+    private fun handleEdgeTap(tapX: Float) {
+        if (drawingController.drawingMode != DrawingMode.VIEW) return
 
-    fun setAnnotations(annotations: String?) {
-        mAnnotations = annotations ?: ""
-        mParsedAnnotations = parseAnnotations(mAnnotations)
-        // Clear cache and reload to apply annotations
-        mImageCache.evictAll()
-        mAdapter.notifyDataSetChanged()
-    }
+        val zone = classifyTapZone(tapX, width, mEdgeTapZone)
+        val viewportHeight = height
+        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
+        val isPortraitMode = height > width
 
-    fun setMinZoom(minZoom: Float) {
-        mMinScale = minZoom.coerceAtLeast(0.5f)
-        if (mScale < mMinScale) {
-            mScale = mMinScale
-            constrainOffset()
-            applyTransform()
-        }
-    }
+        when (zone) {
+            TapZone.LEFT -> {
+                if (isPortraitMode) {
+                    scrollToCenteredPage(getCurrentCenteredPage() - 1)
+                } else {
+                    val firstVisible = layoutManager.findFirstVisibleItemPosition()
+                    val firstView = layoutManager.findViewByPosition(firstVisible)
+                    val actualTopPadding = mRecyclerView.paddingTop
 
-    fun setMaxZoom(maxZoom: Float) {
-        mMaxScale = maxZoom.coerceAtLeast(1f)
-        if (mScale > mMaxScale) {
-            mScale = mMaxScale
-            constrainOffset()
-            applyTransform()
-        }
-    }
-
-    fun setEdgeTapZone(zone: Float) {
-        mEdgeTapZone = zone.coerceIn(0f, 50f)
-    }
-
-    fun setPdfBackgroundColor(color: Int) {
-        mBackgroundColor = color
-        setBackgroundColor(color)
-    }
-
-    // --- Drawing setters ---
-
-    fun setDrawingMode(mode: String) {
-        val newMode = DrawingMode.fromString(mode)
-        // Commit text input when switching away from text mode
-        if (newMode != DrawingMode.TEXT) {
-            textAnnotationHandler.commitTextInput()
-        }
-        drawingController.drawingMode = newMode
-        // Update drawing overlay and ensure it's on top
-        updateDrawingOverlay()
-        mDrawingOverlay.bringToFront()
-    }
-
-    fun setStrokeColor(color: String) {
-        drawingController.strokeColor = color
-    }
-
-    fun setStrokeWidth(width: Float) {
-        drawingController.strokeWidth = width
-    }
-
-    fun setStrokeOpacity(opacity: Float) {
-        drawingController.strokeOpacity = opacity
-    }
-
-    fun setTextColor(color: String) {
-        drawingController.textColor = color
-        textAnnotationHandler.textColor = color
-    }
-
-    fun setTextFontSize(size: Float) {
-        drawingController.textFontSize = size
-        textAnnotationHandler.textFontSize = size
-    }
-
-    fun clearStrokes(page: Int) {
-        if (page < 0) {
-            drawingController.clearAllStrokes()
-            drawingController.clearAllTexts()
-        } else {
-            drawingController.clearStrokes(page)
-            drawingController.clearTexts(page)
-        }
-        mDrawingOverlay.invalidate()
-    }
-
-    fun getAnnotations(): com.facebook.react.bridge.WritableMap {
-        return drawingController.getAnnotationsForExport()
-    }
-
-    private fun updateDrawingOverlay() {
-        val pageHeightPx = getPageHeight()
-        if (pageHeightPx <= 0) return
-
-        // Set up multi-page mode
-        mDrawingOverlay.pageCount = mActualPageCount
-        mDrawingOverlay.pageHeight = pageHeightPx.toFloat()
-        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
-        mDrawingOverlay.recyclerPaddingTop = mRecyclerView.paddingTop.toFloat()
-        mDrawingOverlay.zoomScale = mScale
-        mDrawingOverlay.invalidate()
-    }
-
-    // --- DrawingControllerDelegate ---
-
-    override fun onDrawingStart() {
-        val event = Arguments.createMap()
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onDrawingStart", event
-        )
-    }
-
-    override fun onDrawingEnd() {
-        val event = Arguments.createMap()
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onDrawingEnd", event
-        )
-    }
-
-    override fun onStrokeAdded(stroke: DrawingStroke, page: Int) {
-        // Stroke added - redraw handled by onNeedsRedraw
-    }
-
-    override fun onStrokeRemoved(strokeId: String, page: Int) {
-        // Stroke removed - redraw handled by onNeedsRedraw
-    }
-
-    override fun onStrokesCleared(page: Int) {
-        // Strokes cleared - redraw handled by onNeedsRedraw
-    }
-
-    override fun onNeedsRedraw() {
-        // Update scroll offset and invalidate on UI thread
-        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
-        Log.d("ZoomablePdf", "onNeedsRedraw: invalidating overlay, scrollOffset=${mDrawingOverlay.scrollOffset}")
-        // Force immediate redraw by posting invalidation
-        mDrawingOverlay.post {
-            mDrawingOverlay.invalidate()
-        }
-    }
-
-    fun setPdfPaddingTop(padding: Float) {
-        mPaddingTop = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
-        updateRecyclerViewPadding()
-    }
-
-    fun setPdfPaddingBottom(padding: Float) {
-        mPaddingBottom = PixelUtil.toPixelFromDIP(padding).toInt().coerceAtLeast(0)
-        updateRecyclerViewPadding()
-    }
-
-    private fun updateRecyclerViewPadding() {
-        // When zoomed, we need extra padding to allow scrolling to see all content
-        // Use different multipliers: smaller for top, larger for bottom
-        val zoomExtraTop = if (mScale > 1.01f && height > 0) {
-            (height * (mScale - 1) * 0.05f).toInt()
-        } else 0
-        val zoomExtraBottom = if (mScale > 1.01f && height > 0) {
-            (height * (mScale - 1) * 0.25f).toInt()
-        } else 0
-
-        val newTopPadding = mPaddingTop + zoomExtraTop
-        val newBottomPadding = mPaddingBottom + zoomExtraBottom
-
-        // Only update if padding actually changed
-        if (mRecyclerView.paddingTop != newTopPadding || mRecyclerView.paddingBottom != newBottomPadding) {
-            mRecyclerView.setPadding(0, newTopPadding, 0, newBottomPadding)
-            mRecyclerView.clipToPadding = false
-            // Force layout update
-            mRecyclerView.requestLayout()
-        }
-    }
-
-    private fun reloadPdf() {
-        if (mSource.isEmpty()) return
-
-        // Close previous renderer
-        closePdf()
-
-        // Clear cache
-        mImageCache.evictAll()
-
-        // Open PDF
-        val file = File(mSource)
-        try {
-            mFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            mPdfRenderer = PdfRenderer(mFileDescriptor!!)
-
-            // Get dimensions from first page
-            mPdfRenderer?.let { renderer ->
-                if (renderer.pageCount > 0) {
-                    val page = renderer.openPage(0)
-                    mPdfPageWidth = page.width
-                    mPdfPageHeight = page.height
-                    page.close()
+                    if (firstVisible == 0 && firstView != null) {
+                        val currentTop = firstView.top
+                        if (currentTop < actualTopPadding) {
+                            val scrollAmount = currentTop - actualTopPadding
+                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
+                        }
+                    } else {
+                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, -viewportHeight) }
+                    }
                 }
-
-                mActualPageCount = renderer.pageCount
+                onTap("left")
             }
+            TapZone.RIGHT -> {
+                if (isPortraitMode) {
+                    scrollToCenteredPage(getCurrentCenteredPage() + 1)
+                } else {
+                    val lastVisible = layoutManager.findLastVisibleItemPosition()
+                    val lastView = layoutManager.findViewByPosition(lastVisible)
+                    val actualBottomPadding = mRecyclerView.paddingBottom
 
-            mAdapter.notifyDataSetChanged()
-
-            // Update drawing overlay with new page info
-            updateDrawingOverlay()
-
-            // Notify load complete
-            onLoadComplete()
-
-        } catch (e: FileNotFoundException) {
-            onError("File '$mSource' not found.")
-        } catch (e: Exception) {
-            onError("Failed to open PDF: ${e.message}")
+                    if (lastVisible == mActualPageCount - 1 && lastView != null) {
+                        val currentBottom = lastView.bottom
+                        val targetBottom = viewportHeight - actualBottomPadding
+                        if (currentBottom > targetBottom) {
+                            val scrollAmount = currentBottom - targetBottom
+                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
+                        }
+                    } else {
+                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, viewportHeight) }
+                    }
+                }
+                onTap("right")
+            }
+            TapZone.MIDDLE -> { /* handled by gesture detector */ }
         }
     }
 
-    private fun closePdf() {
-        pdfMutex.withLock {
-            try {
-                mPdfRenderer?.close()
-            } catch (e: Exception) {
-                // Ignore errors during cleanup (e.g., page still open from cancelled render)
-            }
-            mPdfRenderer = null
-        }
-        try {
-            mFileDescriptor?.close()
-        } catch (e: Exception) {
-            // Ignore errors during cleanup
-        }
-        mFileDescriptor = null
+    private fun getCurrentCenteredPage(): Int {
+        val pageHeight = getPageHeight()
+        if (pageHeight <= 0) return 0
+        val viewportCenterY = mRecyclerView.computeVerticalScrollOffset() + height / 2
+        return (viewportCenterY / pageHeight).coerceIn(0, mActualPageCount - 1)
     }
+
+    private fun scrollToCenteredPage(targetPage: Int) {
+        val page = targetPage.coerceIn(0, mActualPageCount - 1)
+        val pageHeight = getPageHeight()
+        if (pageHeight <= 0) return
+
+        val pageCenterY = page * pageHeight + pageHeight / 2
+        val targetOffset = pageCenterY - height / 2
+        val currentScroll = mRecyclerView.computeVerticalScrollOffset()
+
+        val maxScroll = mActualPageCount * pageHeight - height + mRecyclerView.paddingTop + mRecyclerView.paddingBottom
+        val clampedOffset = targetOffset.coerceIn(-mRecyclerView.paddingTop, maxScroll.coerceAtLeast(0))
+        val scrollBy = clampedOffset - currentScroll
+
+        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollBy) }
+    }
+
+    // MARK: - Page Tracking
 
     private fun updateCurrentPage() {
         val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
@@ -684,7 +481,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
 
         if (firstVisible == RecyclerView.NO_POSITION) return
 
-        // Use the page that's most visible
         val centerPosition = (firstVisible + lastVisible) / 2
         val newPage = centerPosition.coerceIn(0, mActualPageCount - 1)
 
@@ -694,36 +490,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         }
     }
 
-    private fun getPageHeight(): Int {
-        if (mPdfPageWidth <= 0 || mPdfPageHeight <= 0) return height
-        return (width.toFloat() * mPdfPageHeight / mPdfPageWidth).toInt()
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-
-        // Handle rotation - clear cache and re-render when width changes
-        if (w != mPreviousWidth && mPreviousWidth > 0 && mActualPageCount > 0) {
-            // Clear cache since bitmaps have old dimensions
-            mImageCache.evictAll()
-
-            // Reset zoom
-            mScale = mMinScale
-            mOffsetX = 0f
-            mOffsetY = 0f
-            mPivotY = 0f
-            applyTransform()
-
-            // Force re-bind all visible items
-            mAdapter.notifyDataSetChanged()
-
-            // Update drawing overlay with new dimensions
-            updateDrawingOverlay()
-        }
-        mPreviousWidth = w
-    }
-
-    // --- Zoom animation ---
+    // MARK: - Zoom Animation
 
     private fun animateZoomTo(targetScale: Float, targetOffsetX: Float, scrollDelta: Int = 0, targetPivotY: Float = 0f, duration: Long = 300L) {
         zoomAnimator?.cancel()
@@ -742,7 +509,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 mOffsetX = startOffsetX + (targetOffsetX - startOffsetX) * fraction
                 mPivotY = startPivotY + (targetPivotY - startPivotY) * fraction
 
-                // Animate scroll
                 if (scrollDelta != 0) {
                     val targetScrollSoFar = (scrollDelta * fraction).toInt()
                     val scrollThisFrame = targetScrollSoFar - accumulatedScroll
@@ -753,19 +519,42 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 }
 
                 applyTransform()
-                onZoomChange()
+                onZoomChange(mScale)
             }
             start()
         }
     }
 
-    // --- Public commands ---
+    // MARK: - Layout
 
-    fun resetZoom() {
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+
+        if (w != mPreviousWidth && mPreviousWidth > 0 && mActualPageCount > 0) {
+            mImageCache.evictAll()
+            mScale = mMinScale
+            mOffsetX = 0f
+            mOffsetY = 0f
+            mPivotY = 0f
+            applyTransform()
+            mAdapter.notifyDataSetChanged()
+            updateDrawingOverlay()
+        }
+        mPreviousWidth = w
+    }
+
+    override fun onDetachedFromWindow() {
+        zoomAnimator?.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    // MARK: - Public Commands
+
+    override fun resetZoom() {
         animateZoomTo(mMinScale, 0f)
     }
 
-    fun scrollToPage(page: Int, animated: Boolean) {
+    override fun scrollToPage(page: Int, animated: Boolean) {
         if (page < 0 || page >= mActualPageCount) return
 
         val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return
@@ -776,197 +565,7 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
         }
     }
 
-    // --- React Native events ---
-
-    private fun onError(message: String) {
-        val event = Arguments.createMap()
-        event.putString("message", message)
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onPdfError", event
-        )
-    }
-
-    private fun onLoadComplete() {
-        val event = Arguments.createMap()
-        event.putInt("width", mPdfPageWidth)
-        event.putInt("height", mPdfPageHeight)
-        event.putInt("pageCount", mActualPageCount)
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onPdfLoadComplete", event
-        )
-    }
-
-    private fun onPageChange() {
-        val event = Arguments.createMap()
-        event.putInt("page", mCurrentPage)
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onPageChange", event
-        )
-    }
-
-    private fun onZoomChange() {
-        val event = Arguments.createMap()
-        event.putDouble("scale", mScale.toDouble())
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onZoomChange", event
-        )
-    }
-
-    private fun onTap(position: String) {
-        val event = Arguments.createMap()
-        event.putString("position", position)
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onTap", event
-        )
-    }
-
-    private fun onMiddleClick() {
-        val event = Arguments.createMap()
-        val reactContext = context as ReactContext
-        reactContext.getJSModule(RCTEventEmitter::class.java).receiveEvent(
-            id, "onMiddleClick", event
-        )
-    }
-
-    // MARK: - Single tap handling
-
-    private fun handleEdgeTap(tapX: Float) {
-        // Ignore edge taps in drawing mode
-        if (drawingController.drawingMode != DrawingMode.VIEW) {
-            return
-        }
-
-        val edgeRatio = mEdgeTapZone / 100f
-        val leftEdge = width * edgeRatio
-        val rightEdge = width * (1f - edgeRatio)
-
-        val viewportHeight = height
-        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager
-        if (layoutManager == null) {
-            Log.d("PDF_TAP", "handleEdgeTap: layoutManager is NULL!")
-            return
-        }
-
-        // Get actual padding (includes zoom extra padding)
-        val actualTopPadding = mRecyclerView.paddingTop
-        val actualBottomPadding = mRecyclerView.paddingBottom
-
-        // Check device orientation: portrait (height > width) or landscape (width >= height)
-        val isPortraitMode = height > width
-        Log.d("PDF_TAP", "handleEdgeTap: tapX=$tapX, isPortrait=$isPortraitMode, height=$height, width=$width")
-
-        when {
-            tapX < leftEdge -> {
-                Log.d("PDF_TAP", "handleEdgeTap: LEFT tap")
-                if (isPortraitMode) {
-                    val currentPage = getCurrentCenteredPage()
-                    Log.d("PDF_TAP", "handleEdgeTap: scrollToCenteredPage(${currentPage - 1})")
-                    scrollToCenteredPage(currentPage - 1)
-                } else {
-                    val firstVisible = layoutManager.findFirstVisibleItemPosition()
-                    val firstView = layoutManager.findViewByPosition(firstVisible)
-
-                    if (firstVisible == 0 && firstView != null) {
-                        val currentTop = firstView.top
-                        if (currentTop < actualTopPadding) {
-                            val scrollAmount = currentTop - actualTopPadding
-                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
-                        }
-                    } else {
-                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, -viewportHeight) }
-                    }
-                }
-                onTap("left")
-            }
-            tapX > rightEdge -> {
-                Log.d("PDF_TAP", "handleEdgeTap: RIGHT tap")
-                if (isPortraitMode) {
-                    val currentPage = getCurrentCenteredPage()
-                    Log.d("PDF_TAP", "handleEdgeTap: scrollToCenteredPage(${currentPage + 1})")
-                    scrollToCenteredPage(currentPage + 1)
-                } else {
-                    val lastVisible = layoutManager.findLastVisibleItemPosition()
-                    val lastView = layoutManager.findViewByPosition(lastVisible)
-
-                    if (lastVisible == mActualPageCount - 1 && lastView != null) {
-                        val currentBottom = lastView.bottom
-                        val targetBottom = viewportHeight - actualBottomPadding
-                        if (currentBottom > targetBottom) {
-                            val scrollAmount = currentBottom - targetBottom
-                            mRecyclerView.post { mRecyclerView.smoothScrollBy(0, scrollAmount) }
-                        }
-                    } else {
-                        mRecyclerView.post { mRecyclerView.smoothScrollBy(0, viewportHeight) }
-                    }
-                }
-                onTap("right")
-            }
-        }
-    }
-
-    private fun handleSingleTap(e: MotionEvent) {
-        val tapX = e.x
-        val edgeRatio = mEdgeTapZone / 100f
-        val leftEdge = width * edgeRatio
-        val rightEdge = width * (1f - edgeRatio)
-
-        // Edge taps are handled by handleEdgeTap, this is only for middle zone
-        if (tapX >= leftEdge && tapX <= rightEdge) {
-            onMiddleClick()
-        }
-    }
-
-    private fun getCurrentCenteredPage(): Int {
-        val layoutManager = mRecyclerView.layoutManager as? LinearLayoutManager ?: return 0
-        val pageHeight = getPageHeight()
-        if (pageHeight <= 0) return 0
-
-        // Calculate which page is centered in the viewport
-        val viewportCenterY = mRecyclerView.computeVerticalScrollOffset() + height / 2
-        return (viewportCenterY / pageHeight).coerceIn(0, mActualPageCount - 1)
-    }
-
-    private fun scrollToCenteredPage(targetPage: Int) {
-        val page = targetPage.coerceIn(0, mActualPageCount - 1)
-        val pageHeight = getPageHeight()
-        Log.d("PDF_TAP", "scrollToCenteredPage: targetPage=$targetPage, page=$page, pageHeight=$pageHeight, pageCount=$mActualPageCount")
-        if (pageHeight <= 0) {
-            Log.d("PDF_TAP", "scrollToCenteredPage: pageHeight <= 0, returning!")
-            return
-        }
-
-        // Calculate offset to center the target page in viewport
-        val pageCenterY = page * pageHeight + pageHeight / 2
-        val targetOffset = pageCenterY - height / 2
-        val currentScroll = mRecyclerView.computeVerticalScrollOffset()
-
-        // Clamp to valid scroll range
-        val maxScroll = mActualPageCount * pageHeight - height + mRecyclerView.paddingTop + mRecyclerView.paddingBottom
-        val clampedOffset = targetOffset.coerceIn(-mRecyclerView.paddingTop, maxScroll.coerceAtLeast(0))
-        val scrollBy = clampedOffset - currentScroll
-
-        Log.d("PDF_TAP", "scrollToCenteredPage: currentScroll=$currentScroll, targetOffset=$targetOffset, clampedOffset=$clampedOffset, scrollBy=$scrollBy")
-
-        // Post to run after touch event processing completes
-        mRecyclerView.post {
-            mRecyclerView.smoothScrollBy(0, scrollBy)
-        }
-    }
-
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        zoomAnimator?.cancel()
-        renderScope.cancel()
-        closePdf()
-        mImageCache.evictAll()
-    }
-
-    // --- Adapter ---
+    // MARK: - Adapter
 
     private inner class PdfPageAdapter : RecyclerView.Adapter<PdfPageViewHolder>() {
 
@@ -986,11 +585,9 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
             val pageHeight = getPageHeight()
             holder.imageView.layoutParams.height = pageHeight
 
-            // Add spacing
             val params = holder.imageView.layoutParams as RecyclerView.LayoutParams
             params.bottomMargin = 0
 
-            // Check cache
             val cached = mImageCache.get(position)
             if (cached != null) {
                 holder.imageView.setImageBitmap(cached)
@@ -1024,7 +621,6 @@ class ZoomablePdfScrollView(context: Context, private val pdfMutex: Lock) : Fram
                 bitmap?.let {
                     mImageCache.put(pageIndex, it)
                     withContext(Dispatchers.Main) {
-                        // Only update if this holder is still bound to the same position
                         if (holder.bindingAdapterPosition == pageIndex) {
                             holder.imageView.setImageBitmap(it)
                         }

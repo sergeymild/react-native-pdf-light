@@ -1,7 +1,6 @@
 package com.alpha0010.pdf
 
 import com.facebook.react.bridge.ReadableArray
-import com.facebook.react.common.MapBuilder
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
@@ -9,131 +8,61 @@ import java.util.concurrent.locks.Lock
 
 class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManager<ZoomablePdfScrollView>() {
 
-    override fun getName(): String {
-        return "RNZoomablePdfScrollView"
-    }
+    override fun getName(): String = "RNZoomablePdfScrollView"
 
-    override fun createViewInstance(context: ThemedReactContext): ZoomablePdfScrollView {
-        return ZoomablePdfScrollView(context, pdfMutex)
-    }
+    override fun createViewInstance(context: ThemedReactContext) = ZoomablePdfScrollView(context, pdfMutex)
 
     @ReactProp(name = "source")
-    fun setSource(view: ZoomablePdfScrollView, source: String?) {
-        view.setSource(source ?: "")
-    }
+    fun setSource(view: ZoomablePdfScrollView, source: String?) { view.setSource(source ?: "") }
 
     @ReactProp(name = "annotations")
-    fun setAnnotations(view: ZoomablePdfScrollView, annotations: String?) {
-        view.setAnnotations(annotations)
-    }
+    fun setAnnotations(view: ZoomablePdfScrollView, annotations: String?) { view.setAnnotations(annotations) }
 
     @ReactProp(name = "minZoom")
-    fun setMinZoom(view: ZoomablePdfScrollView, minZoom: Float) {
-        view.setMinZoom(minZoom)
-    }
+    fun setMinZoom(view: ZoomablePdfScrollView, minZoom: Float) { view.setMinZoom(minZoom) }
 
     @ReactProp(name = "maxZoom")
-    fun setMaxZoom(view: ZoomablePdfScrollView, maxZoom: Float) {
-        view.setMaxZoom(maxZoom)
-    }
+    fun setMaxZoom(view: ZoomablePdfScrollView, maxZoom: Float) { view.setMaxZoom(maxZoom) }
 
     @ReactProp(name = "edgeTapZone")
-    fun setEdgeTapZone(view: ZoomablePdfScrollView, zone: Float) {
-        view.setEdgeTapZone(zone)
-    }
+    fun setEdgeTapZone(view: ZoomablePdfScrollView, zone: Float) { view.setEdgeTapZone(zone) }
 
     @ReactProp(name = "pdfPaddingTop")
-    fun setPdfPaddingTop(view: ZoomablePdfScrollView, padding: Float) {
-        view.setPdfPaddingTop(padding)
-    }
+    fun setPdfPaddingTop(view: ZoomablePdfScrollView, padding: Float) { view.setPdfPaddingTop(padding) }
 
     @ReactProp(name = "pdfPaddingBottom")
-    fun setPdfPaddingBottom(view: ZoomablePdfScrollView, padding: Float) {
-        view.setPdfPaddingBottom(padding)
-    }
+    fun setPdfPaddingBottom(view: ZoomablePdfScrollView, padding: Float) { view.setPdfPaddingBottom(padding) }
 
     @ReactProp(name = "pdfBackgroundColor", customType = "Color")
-    fun setPdfBackgroundColor(view: ZoomablePdfScrollView, color: Int?) {
-        if (color != null) {
-            view.setPdfBackgroundColor(color)
-        }
-    }
-
-    // --- Drawing props ---
+    fun setPdfBackgroundColor(view: ZoomablePdfScrollView, color: Int?) { if (color != null) view.setPdfBackgroundColor(color) }
 
     @ReactProp(name = "drawingMode")
-    fun setDrawingMode(view: ZoomablePdfScrollView, mode: String?) {
-        view.setDrawingMode(mode ?: "view")
-    }
+    fun setDrawingMode(view: ZoomablePdfScrollView, mode: String?) { view.setDrawingMode(mode ?: "view") }
 
     @ReactProp(name = "strokeColor")
-    fun setStrokeColor(view: ZoomablePdfScrollView, color: String?) {
-        view.setStrokeColor(color ?: "#000000")
-    }
+    fun setStrokeColor(view: ZoomablePdfScrollView, color: String?) { view.setStrokeColor(color ?: "#000000") }
 
     @ReactProp(name = "strokeWidth")
-    fun setStrokeWidth(view: ZoomablePdfScrollView, width: Float) {
-        view.setStrokeWidth(width)
-    }
+    fun setStrokeWidth(view: ZoomablePdfScrollView, width: Float) { view.setStrokeWidth(width) }
 
     @ReactProp(name = "strokeOpacity")
-    fun setStrokeOpacity(view: ZoomablePdfScrollView, opacity: Float) {
-        view.setStrokeOpacity(opacity)
-    }
+    fun setStrokeOpacity(view: ZoomablePdfScrollView, opacity: Float) { view.setStrokeOpacity(opacity) }
 
     @ReactProp(name = "textColor")
-    fun setTextColor(view: ZoomablePdfScrollView, color: String?) {
-        view.setTextColor(color ?: "#0000FF")
-    }
+    fun setTextColor(view: ZoomablePdfScrollView, color: String?) { view.setTextColor(color ?: "#0000FF") }
 
     @ReactProp(name = "textFontSize")
-    fun setTextFontSize(view: ZoomablePdfScrollView, size: Float) {
-        view.setTextFontSize(size)
-    }
+    fun setTextFontSize(view: ZoomablePdfScrollView, size: Float) { view.setTextFontSize(size) }
 
-    override fun getExportedCustomBubblingEventTypeConstants(): Map<String, Any> {
-        return MapBuilder.builder<String, Any>()
-            .put("onPdfError", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPdfError")))
-            .put("onPdfLoadComplete", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPdfLoadComplete")))
-            .put("onPageChange", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPageChange")))
-            .put("onZoomChange", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onZoomChange")))
-            .put("onTap", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onTap")))
-            .put("onMiddleClick", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onMiddleClick")))
-            .put("onDrawingStart", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingStart")))
-            .put("onDrawingEnd", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingEnd")))
-            .build()
-    }
+    override fun getExportedCustomBubblingEventTypeConstants(): Map<String, Any> = PdfViewerConstants.bubblingEventTypes()
 
-    override fun getCommandsMap(): Map<String, Int> {
-        return MapBuilder.of(
-            "resetZoom", COMMAND_RESET_ZOOM,
-            "scrollToPage", COMMAND_SCROLL_TO_PAGE,
-            "clearStrokes", COMMAND_CLEAR_STROKES
-        )
-    }
+    override fun getCommandsMap(): Map<String, Int> = PdfViewerConstants.commandsMap()
 
     override fun receiveCommand(view: ZoomablePdfScrollView, commandId: String?, args: ReadableArray?) {
         when (commandId) {
             "resetZoom" -> view.resetZoom()
-            "scrollToPage" -> {
-                val page = args?.getInt(0) ?: 0
-                val animated = args?.getBoolean(1) ?: true
-                view.scrollToPage(page, animated)
-            }
-            "clearStrokes" -> {
-                val page = args?.getInt(0) ?: -1
-                view.clearStrokes(page)
-            }
+            "scrollToPage" -> view.scrollToPage(args?.getInt(0) ?: 0, args?.getBoolean(1) ?: true)
+            "clearStrokes" -> view.clearStrokes(args?.getInt(0) ?: -1)
         }
-    }
-
-    fun getAnnotations(view: ZoomablePdfScrollView): com.facebook.react.bridge.WritableMap {
-        return view.getAnnotations()
-    }
-
-    companion object {
-        private const val COMMAND_RESET_ZOOM = 1
-        private const val COMMAND_SCROLL_TO_PAGE = 2
-        private const val COMMAND_CLEAR_STROKES = 3
     }
 }
