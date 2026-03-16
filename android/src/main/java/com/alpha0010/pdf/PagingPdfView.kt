@@ -501,10 +501,52 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         return isZoomed || ev.pointerCount > 1
     }
 
+    private var drawingCancelledByMultiTouch = false
+    private var lastMultiTouchY = 0f
+
+    private fun averageTouchY(event: MotionEvent): Float {
+        var sum = 0f
+        for (i in 0 until event.pointerCount) {
+            sum += event.getY(i)
+        }
+        return sum / event.pointerCount
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val controller = drawingController
 
         if (controller != null && controller.drawingMode != DrawingMode.VIEW) {
+            // Two+ fingers: cancel drawing, handle zoom/pan instead
+            if (event.pointerCount > 1) {
+                if (!drawingCancelledByMultiTouch) {
+                    if (controller.isDrawing) {
+                        controller.handleTouchCancelled()
+                    }
+                    drawingCancelledByMultiTouch = true
+                    lastMultiTouchY = averageTouchY(event)
+                }
+                scaleDetector.onTouchEvent(event)
+
+                // Manual 2-finger scroll
+                val avgY = averageTouchY(event)
+                val deltaY = lastMultiTouchY - avgY
+                if (kotlin.math.abs(deltaY) > 0.5f) {
+                    scrollView.scrollBy(0, deltaY.toInt())
+                    lastMultiTouchY = avgY
+                }
+                return true
+            }
+
+            // After multi-touch ends, keep forwarding scale events until all up
+            if (drawingCancelledByMultiTouch) {
+                scaleDetector.onTouchEvent(event)
+                if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                    drawingCancelledByMultiTouch = false
+                }
+                return true
+            }
+
+            // Single finger: draw
             handleDrawingTouch(event, controller)
             return true
         }

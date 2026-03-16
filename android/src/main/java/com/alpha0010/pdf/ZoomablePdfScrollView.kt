@@ -340,9 +340,43 @@ class ZoomablePdfScrollView(context: Context, pdfMutex: Lock) : PdfViewerBase(co
     @SuppressLint("ClickableViewAccessibility")
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = true
 
+    private var mDrawingCancelledByMultiTouch = false
+    private var mLastMultiTouchY = 0f
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (drawingController.drawingMode != DrawingMode.VIEW) {
+            // Two+ fingers: cancel drawing, handle zoom/pan instead
+            if (event.pointerCount > 1) {
+                if (!mDrawingCancelledByMultiTouch) {
+                    if (drawingController.isDrawing) {
+                        drawingController.handleTouchCancelled()
+                    }
+                    mDrawingCancelledByMultiTouch = true
+                    mLastMultiTouchY = averageTouchY(event)
+                }
+                mScaleDetector.onTouchEvent(event)
+
+                // Manual 2-finger scroll: track average Y movement
+                val avgY = averageTouchY(event)
+                val deltaY = mLastMultiTouchY - avgY
+                if (kotlin.math.abs(deltaY) > 0.5f) {
+                    mRecyclerView.scrollBy(0, deltaY.toInt())
+                    mLastMultiTouchY = avgY
+                }
+                return true
+            }
+
+            // After multi-touch ends, keep forwarding scale events until all up
+            if (mDrawingCancelledByMultiTouch) {
+                mScaleDetector.onTouchEvent(event)
+                if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                    mDrawingCancelledByMultiTouch = false
+                }
+                return true
+            }
+
+            // Single finger: draw
             handleDrawingTouch(event)
             return true
         }
@@ -359,6 +393,14 @@ class ZoomablePdfScrollView(context: Context, pdfMutex: Lock) : PdfViewerBase(co
         }
 
         return true
+    }
+
+    private fun averageTouchY(event: MotionEvent): Float {
+        var sum = 0f
+        for (i in 0 until event.pointerCount) {
+            sum += event.getY(i)
+        }
+        return sum / event.pointerCount
     }
 
     private fun handleDrawingTouch(event: MotionEvent) {
