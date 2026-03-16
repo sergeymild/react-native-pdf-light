@@ -63,6 +63,8 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
             "resetZoom" -> view.resetZoom()
             "scrollToPage" -> view.scrollToPage(args?.getInt(0) ?: 0, args?.getBoolean(1) ?: true)
             "clearStrokes" -> view.clearStrokes(args?.getInt(0) ?: -1)
+            "undo" -> view.undo()
+            "redo" -> view.redo()
         }
     }
 }

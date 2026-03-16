@@ -236,7 +236,7 @@ class TextAnnotationHandler(private val context: Context) {
             point = listOf(textInputNormalizedPoint.x, textInputNormalizedPoint.y),
             str = text
         )
-        delegate.textHandlerDrawingController.addText(drawingText, textInputPage)
+        delegate.textHandlerDrawingController.addTextWithUndo(drawingText, textInputPage)
         delegate.textHandlerRedrawOverlay()
     }
 
@@ -358,14 +358,11 @@ class TextAnnotationHandler(private val context: Context) {
         val normalizedX = (contentPoint.x - pageRect.left) / pageRect.width()
         val normalizedY = (contentPoint.y - pageRect.top) / pageRect.height()
 
-        val movedText = DrawingText(
-            id = text.id,
-            color = text.color,
-            fontSize = text.fontSize,
-            point = listOf(normalizedX, normalizedY),
-            str = text.str
-        )
-        delegate.textHandlerDrawingController.addText(movedText, draggingTextPage)
+        val newPoint = listOf(normalizedX, normalizedY)
+        // Re-add text at original position (it was removed during drag start)
+        delegate.textHandlerDrawingController.addText(text, draggingTextPage)
+        // Record the move as a single undoable action
+        delegate.textHandlerDrawingController.moveTextWithUndo(text.id, text.point, newPoint, draggingTextPage)
         cancelDraggingText()
         delegate.textHandlerRedrawOverlay()
     }

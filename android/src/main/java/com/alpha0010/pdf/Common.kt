@@ -151,6 +151,16 @@ class PageStrokes {
 
 // --- Drawing Controller ---
 
+// --- Undo Action ---
+
+sealed class UndoAction {
+    data class AddStroke(val page: Int, val stroke: DrawingStroke) : UndoAction()
+    data class RemoveStroke(val page: Int, val stroke: DrawingStroke) : UndoAction()
+    data class AddText(val page: Int, val text: DrawingText) : UndoAction()
+    data class RemoveText(val page: Int, val text: DrawingText) : UndoAction()
+    data class MoveText(val page: Int, val textId: String, val fromPoint: List<Float>, val toPoint: List<Float>) : UndoAction()
+}
+
 interface DrawingControllerDelegate {
     fun onDrawingStart()
     fun onDrawingEnd()
@@ -158,6 +168,7 @@ interface DrawingControllerDelegate {
     fun onStrokeRemoved(strokeId: String, page: Int)
     fun onStrokesCleared(page: Int)
     fun onNeedsRedraw()
+    fun onUndoStateChanged(canUndo: Boolean, canRedo: Boolean)
 }
 
 class DrawingController {
@@ -173,6 +184,13 @@ class DrawingController {
     private var activeStroke: Pair<Int, MutableList<PointF>>? = null
     var isDrawing: Boolean = false
         private set
+
+    // Undo/redo
+    private val undoStack = mutableListOf<UndoAction>()
+    private val redoStack = mutableListOf<UndoAction>()
+    private val maxUndoStackSize = 50
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
+    val canRedo: Boolean get() = redoStack.isNotEmpty()
 
     // Text props
     var textColor: String = "#0000FF"
@@ -190,11 +208,13 @@ class DrawingController {
 
     fun clearStrokes(forPage: Int) {
         pageStrokes.clearStrokes(forPage)
+        clearUndoStack()
         delegate?.onStrokesCleared(forPage)
     }
 
     fun clearAllStrokes() {
         pageStrokes.clearAllStrokes()
+        clearUndoStack()
     }
 
     // Text management
@@ -217,6 +237,90 @@ class DrawingController {
 
     fun clearAllTexts() {
         pageTexts.clearAllTexts()
+    }
+
+    // Undoable text operations
+
+    fun addTextWithUndo(text: DrawingText, toPage: Int) {
+        pageTexts.addText(text, toPage)
+        pushUndoAction(UndoAction.AddText(toPage, text))
+    }
+
+    fun removeTextWithUndo(withId: String, fromPage: Int) {
+        val text = pageTexts.getTexts(fromPage).firstOrNull { it.id == withId } ?: return
+        pageTexts.removeText(withId, fromPage)
+        pushUndoAction(UndoAction.RemoveText(fromPage, text))
+    }
+
+    fun moveTextWithUndo(withId: String, fromPoint: List<Float>, toPoint: List<Float>, onPage: Int) {
+        // Update text position in pageTexts
+        val texts = pageTexts.getTexts(onPage).toMutableList()
+        val index = texts.indexOfFirst { it.id == withId }
+        if (index >= 0) {
+            texts[index] = texts[index].copy(point = toPoint)
+            pageTexts.clearTexts(onPage)
+            texts.forEach { pageTexts.addText(it, onPage) }
+        }
+        pushUndoAction(UndoAction.MoveText(onPage, withId, fromPoint, toPoint))
+    }
+
+    // Undo/Redo
+
+    fun undo() {
+        val action = undoStack.removeLastOrNull() ?: return
+        when (action) {
+            is UndoAction.AddStroke -> pageStrokes.removeStroke(action.stroke.id, action.page)
+            is UndoAction.RemoveStroke -> pageStrokes.addStroke(action.stroke, action.page)
+            is UndoAction.AddText -> pageTexts.removeText(action.text.id, action.page)
+            is UndoAction.RemoveText -> pageTexts.addText(action.text, action.page)
+            is UndoAction.MoveText -> moveTextInternal(action.textId, action.fromPoint, action.page)
+        }
+        redoStack.add(action)
+        notifyUndoStateChanged()
+        delegate?.onNeedsRedraw()
+    }
+
+    fun redo() {
+        val action = redoStack.removeLastOrNull() ?: return
+        when (action) {
+            is UndoAction.AddStroke -> pageStrokes.addStroke(action.stroke, action.page)
+            is UndoAction.RemoveStroke -> pageStrokes.removeStroke(action.stroke.id, action.page)
+            is UndoAction.AddText -> pageTexts.addText(action.text, action.page)
+            is UndoAction.RemoveText -> pageTexts.removeText(action.text.id, action.page)
+            is UndoAction.MoveText -> moveTextInternal(action.textId, action.toPoint, action.page)
+        }
+        undoStack.add(action)
+        notifyUndoStateChanged()
+        delegate?.onNeedsRedraw()
+    }
+
+    private fun moveTextInternal(textId: String, toPoint: List<Float>, page: Int) {
+        val texts = pageTexts.getTexts(page).toMutableList()
+        val index = texts.indexOfFirst { it.id == textId }
+        if (index >= 0) {
+            texts[index] = texts[index].copy(point = toPoint)
+            pageTexts.clearTexts(page)
+            texts.forEach { pageTexts.addText(it, page) }
+        }
+    }
+
+    private fun pushUndoAction(action: UndoAction) {
+        undoStack.add(action)
+        if (undoStack.size > maxUndoStackSize) {
+            undoStack.removeFirst()
+        }
+        redoStack.clear()
+        notifyUndoStateChanged()
+    }
+
+    fun clearUndoStack() {
+        undoStack.clear()
+        redoStack.clear()
+        notifyUndoStateChanged()
+    }
+
+    private fun notifyUndoStateChanged() {
+        delegate?.onUndoStateChanged(canUndo, canRedo)
     }
 
     // Touch handling
@@ -286,6 +390,7 @@ class DrawingController {
         )
 
         pageStrokes.addStroke(newStroke, page)
+        pushUndoAction(UndoAction.AddStroke(page, newStroke))
         delegate?.onStrokeAdded(newStroke, page)
     }
 
@@ -298,6 +403,7 @@ class DrawingController {
                 val dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
                 if (dist < threshold) {
                     if (pageStrokes.removeStroke(stroke.id, page)) {
+                        pushUndoAction(UndoAction.RemoveStroke(page, stroke))
                         delegate?.onStrokeRemoved(stroke.id, page)
                         delegate?.onNeedsRedraw()
                     }
@@ -332,6 +438,7 @@ class DrawingController {
 
             if (hitRect.contains(point.x, point.y)) {
                 pageTexts.removeText(text.id, page)
+                pushUndoAction(UndoAction.RemoveText(page, text))
                 delegate?.onNeedsRedraw()
                 return
             }
