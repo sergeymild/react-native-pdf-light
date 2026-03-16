@@ -376,9 +376,22 @@ class PdfPageViewController: UIViewController, UIScrollViewDelegate, UIGestureRe
         guard isViewLoaded else { return }
 
         let isViewMode = mode == .view
-        scrollView.isScrollEnabled = isViewMode
-        scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
         doubleTapGesture?.isEnabled = isViewMode
+
+        if isViewMode {
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 1
+            scrollView.delaysContentTouches = true
+            scrollView.pinchGestureRecognizer?.isEnabled = true
+        } else {
+            // Keep scroll enabled (needed for pinch zoom to work)
+            scrollView.isScrollEnabled = true
+            // Prevent single-finger scrolling, allow 2-finger pan during pinch
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
+            // No delay for drawing responsiveness
+            scrollView.delaysContentTouches = false
+            scrollView.pinchGestureRecognizer?.isEnabled = true
+        }
     }
 
     func redrawOverlay() {

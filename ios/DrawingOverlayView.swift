@@ -146,6 +146,14 @@ class DrawingOverlayView: UIView {
             return
         }
 
+        // Multiple fingers — cancel drawing, let scroll view handle pinch
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if controller.isDrawing {
+                controller.handleTouchCancelled()
+            }
+            return
+        }
+
         // In text mode, delegate to text annotation handler
         if controller.drawingMode == .text, let handler = textAnnotationHandler {
             if handler.handleTouchBegan(touch) { return }
@@ -166,6 +174,14 @@ class DrawingOverlayView: UIView {
               controller.drawingMode != .view,
               let touch = touches.first else {
             super.touchesMoved(touches, with: event)
+            return
+        }
+
+        // Multiple fingers — cancel any active drawing
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if controller.isDrawing {
+                controller.handleTouchCancelled()
+            }
             return
         }
 

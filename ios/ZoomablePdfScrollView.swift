@@ -20,6 +20,8 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     private var doubleTapGesture: UITapGestureRecognizer!
     private var edgeTapGesture: UITapGestureRecognizer!
     private var middleTapGesture: UITapGestureRecognizer!
+    private var drawingPinchGesture: UIPinchGestureRecognizer!
+    private var drawingPanGesture: UIPanGestureRecognizer!
 
     // MARK: - Setup
 
@@ -83,6 +85,22 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         middleTapGesture.require(toFail: doubleTapGesture)
         middleTapGesture.delegate = self
         addGestureRecognizer(middleTapGesture)
+
+        // Pinch gesture for zooming while in drawing mode
+        drawingPinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handleDrawingPinch(_:)))
+        drawingPinchGesture.delegate = self
+        drawingPinchGesture.delaysTouchesBegan = false
+        drawingPinchGesture.isEnabled = false
+        addGestureRecognizer(drawingPinchGesture)
+
+        // 2-finger pan for scrolling while in drawing mode
+        drawingPanGesture = UIPanGestureRecognizer(target: self, action: #selector(handleDrawingPan(_:)))
+        drawingPanGesture.minimumNumberOfTouches = 2
+        drawingPanGesture.maximumNumberOfTouches = 2
+        drawingPanGesture.delegate = self
+        drawingPanGesture.delaysTouchesBegan = false
+        drawingPanGesture.isEnabled = false
+        addGestureRecognizer(drawingPanGesture)
     }
 
     // MARK: - Override Points
@@ -106,6 +124,8 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         scrollView.isScrollEnabled = isViewMode
         scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
         doubleTapGesture.isEnabled = isViewMode
+        drawingPinchGesture.isEnabled = !isViewMode
+        drawingPanGesture.isEnabled = !isViewMode
 
         // Full redraw to fix any stale CATiledLayer tiles
         drawingOverlay.setNeedsDisplay()
@@ -192,6 +212,61 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
 
     @objc private func handleMiddleTap(_ gesture: UITapGestureRecognizer) {
         onMiddleClick?([:])
+    }
+
+    @objc private func handleDrawingPinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            drawingController.handleTouchCancelled()
+        case .changed:
+            let scale = gesture.scale
+            gesture.scale = 1.0
+
+            let currentScale = scrollView.zoomScale
+            let newScale = min(max(currentScale * scale, minZoom), maxZoom)
+            guard newScale != currentScale else { return }
+
+            // Pinch center in visible area coordinates
+            let pinchInView = gesture.location(in: self)
+
+            // Content point under pinch (unzoomed)
+            let contentX = (scrollView.contentOffset.x + pinchInView.x) / currentScale
+            let contentY = (scrollView.contentOffset.y + pinchInView.y) / currentScale
+
+            scrollView.zoomScale = newScale
+
+            // Keep same content point under pinch center
+            scrollView.contentOffset = CGPoint(
+                x: contentX * newScale - pinchInView.x,
+                y: contentY * newScale - pinchInView.y
+            )
+        default:
+            break
+        }
+    }
+
+    @objc private func handleDrawingPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            drawingController.handleTouchCancelled()
+        case .changed:
+            let translation = gesture.translation(in: self)
+            gesture.setTranslation(.zero, in: self)
+
+            var offset = scrollView.contentOffset
+            offset.x -= translation.x
+            offset.y -= translation.y
+
+            // Clamp to content bounds
+            let maxX = max(0, scrollView.contentSize.width * scrollView.zoomScale - scrollView.bounds.width + scrollView.contentInset.right)
+            let maxY = max(0, scrollView.contentSize.height * scrollView.zoomScale - scrollView.bounds.height + scrollView.contentInset.bottom)
+            offset.x = max(-scrollView.contentInset.left, min(maxX, offset.x))
+            offset.y = max(-scrollView.contentInset.top, min(maxY, offset.y))
+
+            scrollView.contentOffset = offset
+        default:
+            break
+        }
     }
 
     private func zoomRectForScale(_ scale: CGFloat, center: CGPoint) -> CGRect {
@@ -416,6 +491,14 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
             return
         }
 
+        // Multiple fingers — cancel drawing, don't start new
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if drawingController.isDrawing {
+                drawingController.handleTouchCancelled()
+            }
+            return
+        }
+
         if realDrawingMode == .text {
             if textAnnotationHandler.handleTouchBegan(touch) { return }
         }
@@ -437,6 +520,14 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard realDrawingMode != .view, let touch = touches.first else {
             super.touchesMoved(touches, with: event)
+            return
+        }
+
+        // Multiple fingers — cancel any active drawing
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if drawingController.isDrawing {
+                drawingController.handleTouchCancelled()
+            }
             return
         }
 
@@ -490,6 +581,10 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     // MARK: - UIGestureRecognizerDelegate
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === drawingPinchGesture || gestureRecognizer === drawingPanGesture {
+            return realDrawingMode != .view
+        }
+
         if realDrawingMode != .view {
             if gestureRecognizer === edgeTapGesture ||
                gestureRecognizer === middleTapGesture ||
@@ -510,6 +605,15 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         }
 
         return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Allow drawing pinch and pan to work simultaneously with each other and raw touches
+        let drawingGestures: [UIGestureRecognizer] = [drawingPinchGesture, drawingPanGesture]
+        if drawingGestures.contains(where: { $0 === gestureRecognizer || $0 === otherGestureRecognizer }) {
+            return true
+        }
+        return false
     }
 }
 

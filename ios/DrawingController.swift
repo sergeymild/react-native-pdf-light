@@ -225,11 +225,11 @@ class DrawingController {
             // Try to erase at this point
             eraseStroke(at: point, page: page, contentRect: contentRect)
         } else {
-            // Start drawing
+            // Start drawing (don't redraw yet — wait for first move to avoid
+            // visual flash when a second finger arrives and pinch cancels)
             isDrawing = true
             activeStroke = (page: page, path: [point])
             delegate?.drawingControllerDidStartDrawing(self)
-            delegate?.drawingControllerNeedsRedraw(self)
         }
     }
 
