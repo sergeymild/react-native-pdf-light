@@ -89,6 +89,9 @@ type NativePagingPdfViewProps = {
   // Drawing events
   onDrawingStart: (event: NativeSyntheticEvent<{}>) => void;
   onDrawingEnd: (event: NativeSyntheticEvent<{}>) => void;
+  onUndoStateChange: (
+    event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>
+  ) => void;
 
   style?: ViewStyle;
 };
@@ -197,6 +200,11 @@ export type NativePagingPdfViewProps_Public = {
    */
   onDrawingEnd?: () => void;
 
+  /**
+   * Callback when undo/redo availability changes.
+   */
+  onUndoStateChange?: (state: { canUndo: boolean; canRedo: boolean }) => void;
+
   style?: ViewStyle;
 };
 
@@ -227,6 +235,16 @@ export type NativePagingPdfViewRef = {
   getAnnotations: () => Promise<
     Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
   >;
+
+  /**
+   * Undo the last drawing action.
+   */
+  undo: () => void;
+
+  /**
+   * Redo the last undone action.
+   */
+  redo: () => void;
 };
 
 // --- Native component ---
@@ -271,6 +289,7 @@ export const NativePagingPdfView = forwardRef<
     onMiddleClick,
     onDrawingStart,
     onDrawingEnd,
+    onUndoStateChange,
     style,
   } = props;
 
@@ -316,6 +335,22 @@ export const NativePagingPdfView = forwardRef<
         }
       }
       return {};
+    },
+    undo: () => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          UIManager.dispatchViewManagerCommand(handle, 'undo', []);
+        }
+      }
+    },
+    redo: () => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          UIManager.dispatchViewManagerCommand(handle, 'redo', []);
+        }
+      }
     },
   }));
 
@@ -373,6 +408,13 @@ export const NativePagingPdfView = forwardRef<
     [onDrawingEnd]
   );
 
+  const handleUndoStateChange = useCallback(
+    (event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>) => {
+      onUndoStateChange?.(event.nativeEvent);
+    },
+    [onUndoStateChange]
+  );
+
   return (
     <RNPagingPdfView
       ref={viewRef}
@@ -397,6 +439,7 @@ export const NativePagingPdfView = forwardRef<
       onMiddleClick={handleMiddleClick}
       onDrawingStart={handleDrawingStart}
       onDrawingEnd={handleDrawingEnd}
+      onUndoStateChange={handleUndoStateChange}
       style={style}
     />
   );

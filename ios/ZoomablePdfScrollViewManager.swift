@@ -18,6 +18,14 @@ class ZoomablePdfScrollViewManager: RCTViewManager {
         withPdfView(node) { $0.scrollToPage(page, animated: animated) }
     }
 
+    @objc func undo(_ node: NSNumber) {
+        withPdfView(node) { $0.undo() }
+    }
+
+    @objc func redo(_ node: NSNumber) {
+        withPdfView(node) { $0.redo() }
+    }
+
     @objc func clearStrokes(_ node: NSNumber, page: Int) {
         withPdfView(node) { $0.clearStrokes(page: page) }
     }

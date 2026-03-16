@@ -181,7 +181,7 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
             point: [textInputNormalizedPoint.x, textInputNormalizedPoint.y],
             str: text
         )
-        delegate.textHandlerDrawingController.addText(drawingText, toPage: textInputPage)
+        delegate.textHandlerDrawingController.addTextWithUndo(drawingText, toPage: textInputPage)
         delegate.textHandlerRedrawOverlay()
     }
 
@@ -309,14 +309,11 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         let normalizedX = contentX / pageRect.width
         let normalizedY = (contentY - pageRect.minY) / pageRect.height
 
-        let movedText = DrawingText(
-            id: text.id,
-            color: text.color,
-            fontSize: text.fontSize,
-            point: [normalizedX, normalizedY],
-            str: text.str
-        )
-        delegate.textHandlerDrawingController.addText(movedText, toPage: draggingTextPage)
+        let newPoint: [CGFloat] = [normalizedX, normalizedY]
+        // Re-add the text at original position first (it was removed during drag start)
+        delegate.textHandlerDrawingController.addText(text, toPage: draggingTextPage)
+        // Then record the move as a single undoable action
+        delegate.textHandlerDrawingController.moveTextWithUndo(withId: text.id, fromPoint: text.point, toPoint: newPoint, onPage: draggingTextPage)
         cancelDraggingText()
         delegate.textHandlerRedrawOverlay()
     }

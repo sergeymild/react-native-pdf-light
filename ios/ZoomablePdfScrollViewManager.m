@@ -29,12 +29,15 @@ RCT_EXPORT_VIEW_PROPERTY(onMiddleClick, RCTDirectEventBlock)
 // Drawing events
 RCT_EXPORT_VIEW_PROPERTY(onDrawingStart, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onDrawingEnd, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onUndoStateChange, RCTDirectEventBlock)
 
 // Text annotation props
 RCT_EXPORT_VIEW_PROPERTY(textColor, NSString)
 RCT_EXPORT_VIEW_PROPERTY(textFontSize, CGFloat)
 
 // Commands
+RCT_EXTERN_METHOD(undo:(nonnull NSNumber *)node)
+RCT_EXTERN_METHOD(redo:(nonnull NSNumber *)node)
 RCT_EXTERN_METHOD(resetZoom:(nonnull NSNumber *)node)
 RCT_EXTERN_METHOD(scrollToPage:(nonnull NSNumber *)node page:(int)page animated:(BOOL)animated)
 RCT_EXTERN_METHOD(clearStrokes:(nonnull NSNumber *)node page:(int)page)

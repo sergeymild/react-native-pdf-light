@@ -100,6 +100,16 @@ struct DrawingText {
     let str: String
 }
 
+// MARK: - Undo Action
+
+enum UndoAction {
+    case addStroke(page: Int, stroke: DrawingStroke)
+    case removeStroke(page: Int, stroke: DrawingStroke)
+    case addText(page: Int, text: DrawingText)
+    case removeText(page: Int, text: DrawingText)
+    case moveText(page: Int, textId: String, fromPoint: [CGFloat], toPoint: [CGFloat])
+}
+
 // MARK: - Per-Page Texts Container
 
 struct PageTexts {

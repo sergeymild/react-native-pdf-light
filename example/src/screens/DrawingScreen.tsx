@@ -5,7 +5,7 @@ import {
   Text,
   TouchableOpacity,
   SafeAreaView,
-  Alert,
+  Alert, ScrollView,
 } from 'react-native';
 import {
   PdfViewer,
@@ -44,6 +44,8 @@ export function DrawingScreen({ onBack }: Props) {
   const pageIndicatorRef = useRef<PageIndicatorRef>(null);
 
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('view');
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const drawingTool: DrawingTool = useMemo(() => {
     if (drawingMode === 'highlight') {
@@ -134,32 +136,48 @@ export function DrawingScreen({ onBack }: Props) {
       </View>
 
       <View style={styles.toolbar}>
-        {MODES.map((btn) => (
-          <TouchableOpacity
-            key={btn.mode}
-            style={[
-              styles.modeButton,
-              { backgroundColor: btn.color },
-              drawingMode === btn.mode && styles.modeButtonActive,
-            ]}
-            onPress={() => setDrawingMode(btn.mode)}
-          >
-            <Text
+        <ScrollView horizontal>
+          {MODES.map((btn) => (
+            <TouchableOpacity
+              key={btn.mode}
               style={[
-                styles.modeButtonText,
-                drawingMode === btn.mode && styles.modeButtonTextActive,
+                styles.modeButton,
+                { backgroundColor: btn.color },
+                drawingMode === btn.mode && styles.modeButtonActive,
               ]}
+              onPress={() => setDrawingMode(btn.mode)}
             >
-              {btn.label}
-            </Text>
+              <Text
+                style={[
+                  styles.modeButtonText,
+                  drawingMode === btn.mode && styles.modeButtonTextActive,
+                ]}
+              >
+                {btn.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={[styles.undoButton, !canUndo && styles.buttonDisabled]}
+            onPress={() => pdfViewRef.current?.undo()}
+            disabled={!canUndo}
+          >
+            <Text style={styles.undoButtonText}>Undo</Text>
           </TouchableOpacity>
-        ))}
-        <TouchableOpacity style={styles.clearButton} onPress={handleClearAll}>
-          <Text style={styles.clearButtonText}>Clear</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Save</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.undoButton, !canRedo && styles.buttonDisabled]}
+            onPress={() => pdfViewRef.current?.redo()}
+            disabled={!canRedo}
+          >
+            <Text style={styles.undoButtonText}>Redo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.clearButton} onPress={handleClearAll}>
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+            <Text style={styles.saveButtonText}>Save</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       <PdfViewer
@@ -176,6 +194,10 @@ export function DrawingScreen({ onBack }: Props) {
         textTool={DEFAULT_TEXT_TOOL}
         onDrawingStart={() => console.log('Drawing started')}
         onDrawingEnd={() => console.log('Drawing ended')}
+        onUndoStateChange={(state) => {
+          setCanUndo(state.canUndo);
+          setCanRedo(state.canRedo);
+        }}
         onLoadComplete={handleLoadComplete}
         onPageChange={handlePageChange}
         onZoomChange={handleZoomChange}
@@ -245,6 +267,20 @@ const styles = StyleSheet.create({
   },
   modeButtonTextActive: {
     fontWeight: '700',
+  },
+  undoButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#607D8B',
+  },
+  undoButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  buttonDisabled: {
+    opacity: 0.3,
   },
   clearButton: {
     marginLeft: 'auto',

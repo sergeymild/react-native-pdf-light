@@ -23,6 +23,9 @@ protocol DrawingControllerDelegate: AnyObject {
 
     /// Called when user taps in text mode to request text input
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int)
+
+    /// Called when undo/redo availability changes
+    func drawingController(_ controller: DrawingController, undoStateChanged canUndo: Bool, canRedo: Bool)
 }
 
 // MARK: - DrawingController
@@ -53,6 +56,14 @@ class DrawingController {
     /// Text annotations organized by page
     private(set) var pageTexts = PageTexts()
 
+    /// Undo/redo stacks
+    private var undoStack: [UndoAction] = []
+    private var redoStack: [UndoAction] = []
+    private let maxUndoStackSize = 50
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
     /// Active stroke being drawn (page index and path points in content coordinates)
     private var activeStroke: (page: Int, path: [CGPoint])?
 
@@ -69,6 +80,7 @@ class DrawingController {
     /// Set all page strokes at once (from JSON prop)
     func setAllStrokes(_ allStrokes: PageStrokes) {
         pageStrokes = allStrokes
+        clearUndoStack()
     }
 
     /// Get strokes for a specific page
@@ -79,12 +91,14 @@ class DrawingController {
     /// Clear strokes for a specific page
     func clearStrokes(forPage page: Int) {
         pageStrokes.clearStrokes(forPage: page)
+        clearUndoStack()
         delegate?.drawingController(self, strokesCleared: page)
     }
 
     /// Clear all strokes
     func clearAllStrokes() {
         pageStrokes.clearAllStrokes()
+        clearUndoStack()
     }
 
     // MARK: - Text Management
@@ -111,6 +125,87 @@ class DrawingController {
 
     func clearAllTexts() {
         pageTexts.clearAllTexts()
+    }
+
+    // MARK: - Undoable Text Operations
+
+    func addTextWithUndo(_ text: DrawingText, toPage page: Int) {
+        pageTexts.addText(text, toPage: page)
+        pushUndoAction(.addText(page: page, text: text))
+    }
+
+    func removeTextWithUndo(withId id: String, onPage page: Int) {
+        guard let text = pageTexts.getTexts(forPage: page).first(where: { $0.id == id }) else { return }
+        _ = pageTexts.removeText(withId: id, fromPage: page)
+        pushUndoAction(.removeText(page: page, text: text))
+    }
+
+    func moveTextWithUndo(withId id: String, fromPoint: [CGFloat], toPoint: [CGFloat], onPage page: Int) {
+        pageTexts.moveText(withId: id, toPoint: toPoint, onPage: page)
+        pushUndoAction(.moveText(page: page, textId: id, fromPoint: fromPoint, toPoint: toPoint))
+    }
+
+    // MARK: - Undo/Redo
+
+    func undo() {
+        guard let action = undoStack.popLast() else { return }
+
+        switch action {
+        case .addStroke(let page, let stroke):
+            _ = pageStrokes.removeStroke(withId: stroke.id, fromPage: page)
+        case .removeStroke(let page, let stroke):
+            pageStrokes.addStroke(stroke, toPage: page)
+        case .addText(let page, let text):
+            _ = pageTexts.removeText(withId: text.id, fromPage: page)
+        case .removeText(let page, let text):
+            pageTexts.addText(text, toPage: page)
+        case .moveText(let page, let textId, let fromPoint, _):
+            pageTexts.moveText(withId: textId, toPoint: fromPoint, onPage: page)
+        }
+
+        redoStack.append(action)
+        notifyUndoStateChanged()
+        delegate?.drawingControllerNeedsRedraw(self)
+    }
+
+    func redo() {
+        guard let action = redoStack.popLast() else { return }
+
+        switch action {
+        case .addStroke(let page, let stroke):
+            pageStrokes.addStroke(stroke, toPage: page)
+        case .removeStroke(let page, let stroke):
+            _ = pageStrokes.removeStroke(withId: stroke.id, fromPage: page)
+        case .addText(let page, let text):
+            pageTexts.addText(text, toPage: page)
+        case .removeText(let page, let text):
+            _ = pageTexts.removeText(withId: text.id, fromPage: page)
+        case .moveText(let page, let textId, _, let toPoint):
+            pageTexts.moveText(withId: textId, toPoint: toPoint, onPage: page)
+        }
+
+        undoStack.append(action)
+        notifyUndoStateChanged()
+        delegate?.drawingControllerNeedsRedraw(self)
+    }
+
+    private func pushUndoAction(_ action: UndoAction) {
+        undoStack.append(action)
+        if undoStack.count > maxUndoStackSize {
+            undoStack.removeFirst()
+        }
+        redoStack.removeAll()
+        notifyUndoStateChanged()
+    }
+
+    func clearUndoStack() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+        notifyUndoStateChanged()
+    }
+
+    private func notifyUndoStateChanged() {
+        delegate?.drawingController(self, undoStateChanged: canUndo, canRedo: canRedo)
     }
 
     // MARK: - Touch Handling
@@ -193,6 +288,7 @@ class DrawingController {
         )
 
         pageStrokes.addStroke(newStroke, toPage: page)
+        pushUndoAction(.addStroke(page: page, stroke: newStroke))
         delegate?.drawingController(self, didAddStroke: newStroke, onPage: page)
     }
 
@@ -208,6 +304,7 @@ class DrawingController {
                 let dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
                 if dist < threshold {
                     if pageStrokes.removeStroke(withId: stroke.id, fromPage: page) {
+                        pushUndoAction(.removeStroke(page: page, stroke: stroke))
                         delegate?.drawingController(self, didRemoveStroke: stroke.id, onPage: page)
                         delegate?.drawingControllerNeedsRedraw(self)
                     }
@@ -248,6 +345,7 @@ class DrawingController {
 
             if hitRect.contains(point) {
                 _ = pageTexts.removeText(withId: text.id, fromPage: page)
+                pushUndoAction(.removeText(page: page, text: text))
                 delegate?.drawingControllerNeedsRedraw(self)
                 return
             }

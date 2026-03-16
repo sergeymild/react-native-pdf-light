@@ -87,6 +87,7 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
     @objc var onMiddleClick: RCTDirectEventBlock?
     @objc var onDrawingStart: RCTDirectEventBlock?
     @objc var onDrawingEnd: RCTDirectEventBlock?
+    @objc var onUndoStateChange: RCTDirectEventBlock?
 
     // MARK: - Text Annotation Props
 
@@ -300,6 +301,14 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
         // Override in subclass
     }
 
+    func undo() {
+        drawingController.undo()
+    }
+
+    func redo() {
+        drawingController.redo()
+    }
+
     func clearStrokes(page: Int) {
         if page >= 0 {
             drawingController.clearStrokes(forPage: page)
@@ -341,5 +350,9 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
 
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
         // Handled by TextAnnotationHandler via touch interception
+    }
+
+    func drawingController(_ controller: DrawingController, undoStateChanged canUndo: Bool, canRedo: Bool) {
+        onUndoStateChange?(["canUndo": canUndo, "canRedo": canRedo])
     }
 }

@@ -160,6 +160,11 @@ type PdfViewerCommonProps = {
   onDrawingEnd?: () => void;
 
   /**
+   * Callback when undo/redo availability changes.
+   */
+  onUndoStateChange?: (state: { canUndo: boolean; canRedo: boolean }) => void;
+
+  /**
    * Callback when a stroke is completed.
    * Add the stroke to your annotations[page].strokes array.
    * The stroke has required id and opacity fields.
