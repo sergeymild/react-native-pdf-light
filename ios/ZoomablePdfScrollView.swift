@@ -496,6 +496,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
             if drawingController.isDrawing {
                 drawingController.handleTouchCancelled()
             }
+            textAnnotationHandler.handleMultiTouchDetected()
             return
         }
 
@@ -528,10 +529,11 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
             if drawingController.isDrawing {
                 drawingController.handleTouchCancelled()
             }
+            textAnnotationHandler.handleMultiTouchDetected()
             return
         }
 
-        if textAnnotationHandler.isDraggingText {
+        if textAnnotationHandler.isDraggingText || textAnnotationHandler.hasPendingText {
             textAnnotationHandler.handleTouchMoved(touch)
             return
         }
@@ -553,7 +555,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
             return
         }
 
-        if textAnnotationHandler.isDraggingText {
+        if textAnnotationHandler.isDraggingText || textAnnotationHandler.hasPendingText {
             textAnnotationHandler.handleTouchEnded(touch)
             return
         }
@@ -570,7 +572,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
             return
         }
 
-        if textAnnotationHandler.isDraggingText {
+        if textAnnotationHandler.isDraggingText || textAnnotationHandler.hasPendingText {
             textAnnotationHandler.handleTouchCancelled()
             return
         }

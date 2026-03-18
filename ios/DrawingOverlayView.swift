@@ -151,6 +151,7 @@ class DrawingOverlayView: UIView {
             if controller.isDrawing {
                 controller.handleTouchCancelled()
             }
+            textAnnotationHandler?.handleMultiTouchDetected()
             return
         }
 
@@ -182,11 +183,12 @@ class DrawingOverlayView: UIView {
             if controller.isDrawing {
                 controller.handleTouchCancelled()
             }
+            textAnnotationHandler?.handleMultiTouchDetected()
             return
         }
 
-        // Handle text dragging
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        // Handle text dragging or pending text (tap vs drag detection)
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchMoved(touch)
             return
         }
@@ -209,7 +211,7 @@ class DrawingOverlayView: UIView {
             return
         }
 
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchEnded(touch)
             return
         }
@@ -224,7 +226,7 @@ class DrawingOverlayView: UIView {
             return
         }
 
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchCancelled()
             return
         }

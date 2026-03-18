@@ -325,15 +325,14 @@ class DrawingController {
                 .font: UIFont.systemFont(ofSize: text.fontSize)
             ]
             let attrStr = NSAttributedString(string: text.str, attributes: attributes)
-            let maxWidth = contentRect.width * (1 - textX)
-            let boundingRect = attrStr.boundingRect(
-                with: CGSize(width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude),
+            let textSize = attrStr.boundingRect(
+                with: CGSize(width: 100000, height: 100000),
                 options: [.usesLineFragmentOrigin],
                 context: nil
-            )
+            ).size
 
-            let normalizedWidth = boundingRect.width / contentRect.width
-            let normalizedHeight = boundingRect.height / contentRect.height
+            let normalizedWidth = textSize.width / contentRect.width
+            let normalizedHeight = textSize.height / contentRect.height
 
             let padding: CGFloat = 0.02
             let hitRect = CGRect(
@@ -546,23 +545,20 @@ class DrawingController {
 
             let x: CGFloat
             let y: CGFloat
-            let maxWidth: CGFloat
 
             if useNormalized && !contentRect.isEmpty {
                 let pt = normalizedToContent(text.point, contentRect: contentRect)
                 x = pt.x
                 y = pt.y
-                maxWidth = contentRect.maxX - pt.x
             } else {
                 x = text.point[0]
                 y = text.point[1]
-                maxWidth = contentRect.width - x
             }
 
             let attributedString = NSAttributedString(string: text.str, attributes: attributes)
-            let drawRect = CGRect(x: x, y: y, width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude)
-
-            attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+            // Large width prevents word-wrap; \n still creates line breaks
+            let drawRect = CGRect(x: x, y: y, width: 100000, height: 100000)
+            attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin], context: nil)
         }
     }
 

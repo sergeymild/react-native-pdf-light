@@ -37,8 +37,24 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
     private var draggingTouchOffset: CGPoint = .zero
     private var draggingText: DrawingText?
 
+    // Pending touch: tap vs multi-finger detection
+    private var pendingText: DrawingText? // existing text hit
+    private var pendingNewTextPoint: CGPoint? // new text tap (no hit)
+    private var pendingTextPage: Int = 0
+    private var pendingTouchStart: CGPoint = .zero
+    private let dragThreshold: CGFloat = 8.0
+    private var pendingWasMultiTouch = false
+
+    // Editing existing text
+    private var editingTextId: String?
+    private var editingTextColor: String?
+
     var hasActiveTextInput: Bool {
         return textInputView != nil
+    }
+
+    var hasPendingText: Bool {
+        return pendingText != nil || pendingNewTextPoint != nil
     }
 
     // MARK: - Touch Handling
@@ -69,24 +85,58 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         let normalizedY = (location.y - pageRect.minY) / pageRect.height
         let normalizedPoint = CGPoint(x: normalizedX, y: normalizedY)
 
-        // Check if touching an existing text annotation (start drag)
+        // Check if touching an existing text annotation
         if let (textIndex, textAnnotation) = hitTestTextAnnotation(at: normalizedPoint, page: page) {
-            startDraggingText(
-                textAnnotation: textAnnotation,
-                textIndex: textIndex,
-                page: page,
-                touch: touch
-            )
+            // Don't start drag immediately — wait for movement to distinguish tap vs drag
+            pendingText = textAnnotation
+            pendingTextPage = page
+            pendingTouchStart = touch.location(in: delegate.textHandlerHostView)
+            NSLog("[PdfTextFlow] touchBegan: pendingText set for '%@'", textAnnotation.str)
             return true
         }
 
-        // No existing text — show text input
-        showTextInput(at: normalizedPoint, page: page)
+        // No existing text — defer until touchEnded to avoid opening on multi-finger
+        pendingNewTextPoint = normalizedPoint
+        pendingTextPage = page
+        pendingTouchStart = touch.location(in: delegate.textHandlerHostView)
+        NSLog("[PdfTextFlow] touchBegan: pendingNewText at (%f, %f)", normalizedPoint.x, normalizedPoint.y)
         return true
     }
 
     func handleTouchMoved(_ touch: UITouch) {
-        guard isDraggingText, let delegate = delegate else { return }
+        guard let delegate = delegate else { return }
+
+        // If pending new text and finger moves, mark as moved (not a clean tap)
+        if pendingNewTextPoint != nil {
+            let location = touch.location(in: delegate.textHandlerHostView)
+            let dist = hypot(location.x - pendingTouchStart.x, location.y - pendingTouchStart.y)
+            if dist >= dragThreshold {
+                NSLog("[PdfTextFlow] touchMoved: pendingNew cancelled (moved %.1f)", dist)
+                pendingWasMultiTouch = true // finger moved = not a tap
+                clearPending()
+            }
+            return
+        }
+
+        // If we have a pending text hit, check if finger moved enough to start drag
+        if let text = pendingText {
+            let location = touch.location(in: delegate.textHandlerHostView)
+            let dist = hypot(location.x - pendingTouchStart.x, location.y - pendingTouchStart.y)
+            NSLog("[PdfTextFlow] touchMoved: pending dist=%.1f threshold=%.1f", dist, dragThreshold)
+            if dist >= dragThreshold {
+                NSLog("[PdfTextFlow] touchMoved: starting drag for '%@'", text.str)
+                startDraggingText(
+                    textAnnotation: text,
+                    textIndex: 0,
+                    page: pendingTextPage,
+                    touch: touch
+                )
+                clearPending()
+            }
+            return
+        }
+
+        guard isDraggingText else { return }
         let location = touch.location(in: delegate.textHandlerHostView)
         guard let label = draggingLabel else { return }
         label.frame.origin = CGPoint(
@@ -96,11 +146,52 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
     }
 
     func handleTouchEnded(_ touch: UITouch) {
-        guard isDraggingText, let delegate = delegate else { return }
+        // If pending existing text and no drag started — this is a tap → edit
+        if let text = pendingText {
+            NSLog("[PdfTextFlow] touchEnded: tap detected → editExistingText '%@'", text.str)
+            editExistingText(text, page: pendingTextPage)
+            clearPending()
+            return
+        }
+
+        // If pending new text — this is a tap → show input
+        if let point = pendingNewTextPoint {
+            NSLog("[PdfTextFlow] touchEnded: tap detected → showTextInput")
+            showTextInput(at: point, page: pendingTextPage)
+            clearPending()
+            return
+        }
+
+        guard isDraggingText, let _ = delegate else { return }
+        NSLog("[PdfTextFlow] touchEnded: finishing drag")
         finishDraggingText(touch: touch)
     }
 
+    func handleMultiTouchDetected() {
+        // Called by callers when 2+ fingers detected — ensures pending new text won't open
+        pendingWasMultiTouch = true
+    }
+
     func handleTouchCancelled() {
+        NSLog("[PdfTextFlow] touchCancelled: pendingText=%d pendingNew=%d dragging=%d", pendingText != nil ? 1 : 0, pendingNewTextPoint != nil ? 1 : 0, isDraggingText ? 1 : 0)
+        // If pending existing text (finger didn't move enough to drag), treat cancel as tap → edit
+        if let text = pendingText {
+            NSLog("[PdfTextFlow] touchCancelled: treating as tap → edit '%@'", text.str)
+            editExistingText(text, page: pendingTextPage)
+            clearPending()
+            return
+        }
+        // If pending new text: open input only if it wasn't a multi-touch/move gesture
+        if let point = pendingNewTextPoint {
+            if pendingWasMultiTouch {
+                NSLog("[PdfTextFlow] touchCancelled: pendingNew cancelled (was multi-touch)")
+            } else {
+                NSLog("[PdfTextFlow] touchCancelled: pendingNew → showTextInput (single finger cancel)")
+                showTextInput(at: point, page: pendingTextPage)
+            }
+            clearPending()
+            return
+        }
         guard isDraggingText else { return }
         // Restore text at original position on cancel
         if let text = draggingText, let delegate = delegate {
@@ -110,9 +201,31 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         cancelDraggingText()
     }
 
+    private func clearPending() {
+        pendingText = nil
+        pendingNewTextPoint = nil
+        pendingWasMultiTouch = false
+    }
+
+    // MARK: - Edit Existing Text
+
+    private func editExistingText(_ text: DrawingText, page: Int) {
+        guard let delegate = delegate else { return }
+
+        // Remove text from model so it doesn't render while editing
+        delegate.textHandlerDrawingController.removeText(withId: text.id, onPage: page)
+        delegate.textHandlerRedrawOverlay()
+
+        // Show input at the text's position with its content
+        let normalizedPoint = CGPoint(x: CGFloat(text.point[0]), y: CGFloat(text.point[1]))
+        editingTextId = text.id
+        editingTextColor = text.color
+        showTextInput(at: normalizedPoint, page: page, existingText: text.str, color: text.color, fontSize: text.fontSize)
+    }
+
     // MARK: - Text Input
 
-    private func showTextInput(at normalizedPoint: CGPoint, page: Int) {
+    private func showTextInput(at normalizedPoint: CGPoint, page: Int, existingText: String? = nil, color: String? = nil, fontSize: CGFloat? = nil) {
         guard let delegate = delegate else { return }
 
         textInputPage = page
@@ -126,21 +239,36 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         let contentY = pageRect.minY + normalizedPoint.y * pageRect.height
         let maxWidthInContent = pageRect.width - contentX
 
+        let useFontSize = fontSize ?? textFontSize
+        let useColor = color ?? textColor
+
         let textView = UITextView()
         textView.backgroundColor = .clear
-        textView.font = UIFont.systemFont(ofSize: textFontSize)
-        textView.textColor = UIColor(hexString: textColor) ?? .blue
-        textView.isScrollEnabled = false
+        textView.font = UIFont.systemFont(ofSize: useFontSize)
+        textView.textColor = UIColor(hexString: useColor) ?? .blue
+        if let existingText = existingText {
+            textView.text = existingText
+        }
+        textView.isScrollEnabled = true
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
-        textView.returnKeyType = .done
+        textView.textContainer.widthTracksTextView = false
+        textView.textContainer.size = CGSize(width: 100000, height: 100000)
+        textView.returnKeyType = .default
         textView.delegate = self
 
         let textViewWidth = max(60, maxWidthInContent)
-        textView.frame = CGRect(x: contentX, y: contentY, width: textViewWidth, height: textFontSize + 4)
+        textView.frame = CGRect(x: contentX, y: contentY, width: textViewWidth, height: useFontSize + 8)
         textView.autoresizingMask = []
 
         contentContainer.addSubview(textView)
+
+        // Resize to fit existing content (for multi-line text editing)
+        if existingText != nil {
+            let fitSize = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
+            textView.frame.size.height = max(fitSize.height, useFontSize + 8)
+        }
+
         textView.becomeFirstResponder()
 
         textInputView = textView
@@ -157,9 +285,8 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         guard let textView = notification.object as? UITextView,
               textView === textInputView else { return }
 
-        let fixedWidth = textView.frame.width
-        let newSize = textView.sizeThatFits(CGSize(width: fixedWidth, height: CGFloat.greatestFiniteMagnitude))
-        textView.frame.size.height = max(newSize.height, textFontSize + 4)
+        let newSize = textView.sizeThatFits(CGSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude))
+        textView.frame.size.height = max(newSize.height, (textView.font?.pointSize ?? textFontSize) + 8)
     }
 
     func commitTextInput() {
@@ -168,16 +295,23 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         NotificationCenter.default.removeObserver(self, name: UITextView.textDidChangeNotification, object: textView)
 
         let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let inputFontSize = textView.font?.pointSize ?? textFontSize
+
         textView.resignFirstResponder()
         textView.removeFromSuperview()
         textInputView = nil
 
+        let existingId = editingTextId
+        let existingColor = editingTextColor ?? textColor
+        editingTextId = nil
+        editingTextColor = nil
+
         guard !text.isEmpty else { return }
 
         let drawingText = DrawingText(
-            id: UUID().uuidString,
-            color: textColor,
-            fontSize: textFontSize,
+            id: existingId ?? UUID().uuidString,
+            color: existingId != nil ? existingColor : textColor,
+            fontSize: inputFontSize,
             point: [textInputNormalizedPoint.x, textInputNormalizedPoint.y],
             str: text
         )
@@ -187,14 +321,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
 
     // MARK: - UITextViewDelegate
 
-    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        if text == "\n" {
-            commitTextInput()
-            return false
-        }
-        return true
-    }
-
     // MARK: - Hit Test
 
     private func hitTestTextAnnotation(at normalizedPoint: CGPoint, page: Int) -> (Int, DrawingText)? {
@@ -203,6 +329,8 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         let texts = delegate.textHandlerDrawingController.getTexts(forPage: page)
         let pageRect = delegate.textHandlerContentRectForPage(page)
         guard !pageRect.isEmpty else { return nil }
+
+        NSLog("[PdfTextHit] tap=(%f, %f) page=%d textsCount=%d pageRect=(%f,%f,%f,%f)", normalizedPoint.x, normalizedPoint.y, page, texts.count, pageRect.origin.x, pageRect.origin.y, pageRect.width, pageRect.height)
 
         for (index, text) in texts.enumerated() {
             guard text.point.count >= 2 else { continue }
@@ -214,15 +342,14 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
                 .font: UIFont.systemFont(ofSize: text.fontSize)
             ]
             let attrStr = NSAttributedString(string: text.str, attributes: attributes)
-            let maxWidth = pageRect.width * (1 - textX)
-            let boundingRect = attrStr.boundingRect(
-                with: CGSize(width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude),
+            let textSize = attrStr.boundingRect(
+                with: CGSize(width: 100000, height: 100000),
                 options: [.usesLineFragmentOrigin],
                 context: nil
-            )
+            ).size
 
-            let normalizedWidth = boundingRect.width / pageRect.width
-            let normalizedHeight = boundingRect.height / pageRect.height
+            let normalizedWidth = textSize.width / pageRect.width
+            let normalizedHeight = textSize.height / pageRect.height
 
             let padding: CGFloat = 0.02
             let hitRect = CGRect(
@@ -231,6 +358,11 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
                 width: normalizedWidth + padding * 2,
                 height: normalizedHeight + padding * 2
             )
+
+            NSLog("[PdfTextHit] text[%d]='%@' pos=(%f,%f) size=(%f,%f) hitRect=(%f,%f,%f,%f) contains=%d",
+                  index, text.str, textX, textY, normalizedWidth, normalizedHeight,
+                  hitRect.origin.x, hitRect.origin.y, hitRect.width, hitRect.height,
+                  hitRect.contains(normalizedPoint) ? 1 : 0)
 
             if hitRect.contains(normalizedPoint) {
                 return (index, text)
@@ -263,12 +395,9 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         label.font = UIFont.systemFont(ofSize: textAnnotation.fontSize * zoomScale)
         label.textColor = (UIColor(hexString: textAnnotation.color) ?? .blue).withAlphaComponent(0.7)
         label.numberOfLines = 0
+        label.lineBreakMode = .byClipping
         label.backgroundColor = .clear
-
-        let textOriginX = textAnnotation.point[0] * pageRect.width
-        let maxWidth = (pageRect.width - textOriginX) * zoomScale
-        let maxSize = CGSize(width: max(120, maxWidth), height: CGFloat.greatestFiniteMagnitude)
-        label.frame.size = label.sizeThatFits(maxSize)
+        label.sizeToFit()
 
         // Convert text position from content to host view coordinates
         let contentContainer = delegate.textHandlerContentContainer
