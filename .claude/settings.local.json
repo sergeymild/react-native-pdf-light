@@ -21,7 +21,8 @@
       "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example && npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output /tmp/test-bundle.js 2>&1 | tail -20)",
       "Bash(wc -l /Users/sergeigolishnikov/development/react-native-pdf-light/android/src/main/java/com/alpha0010/pdf/*.kt)",
       "Bash(cd:*)",
-      "Bash(xcodebuild:*)"
+      "Bash(xcodebuild:*)",
+      "Bash(./gradlew assembleDebug)"
     ]
   }
 }

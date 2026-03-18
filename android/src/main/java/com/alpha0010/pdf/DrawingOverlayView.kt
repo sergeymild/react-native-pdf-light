@@ -279,11 +279,12 @@ class DrawingOverlayView(context: Context) : View(context) {
 
             val x = rect.left + text.point[0] * rect.width()
             val y = rect.top + text.point[1] * rect.height()
-            val maxWidth = ((1f - text.point[0]) * rect.width() * scale).toInt().coerceAtLeast(1)
+            // Large width prevents word-wrap; \n still creates line breaks
+            val largeWidth = 100000
 
             canvas.save()
             canvas.translate(x, y)
-            val layout = StaticLayout.Builder.obtain(text.str, 0, text.str.length, textPaint, maxWidth)
+            val layout = StaticLayout.Builder.obtain(text.str, 0, text.str.length, textPaint, largeWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setLineSpacing(0f, 1f)
                 .setIncludePad(false)

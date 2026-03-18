@@ -2,7 +2,6 @@ package com.alpha0010.pdf
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.text.InputType
@@ -10,12 +9,12 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import java.util.UUID
+import kotlin.math.hypot
 
 /**
  * Delegate interface for TextAnnotationHandler.
@@ -55,18 +54,46 @@ class TextAnnotationHandler(private val context: Context) {
     private var draggingTouchOffsetY: Float = 0f
     private var draggingText: DrawingText? = null
 
+    // Pending touch: tap vs drag detection
+    private var pendingText: DrawingText? = null       // existing text hit
+    private var pendingNewTextPoint: PointF? = null     // new text tap (no hit)
+    private var pendingNewTextEvent: MotionEvent? = null
+    private var pendingTextPage: Int = 0
+    private var pendingTouchStartX: Float = 0f
+    private var pendingTouchStartY: Float = 0f
+    private val dragThreshold: Float = 24f  // pixels
+    private var pendingWasMultiTouch = false
+
+    // Editing existing text
+    private var editingTextId: String? = null
+    private var editingTextColor: String? = null
+    private var editingTextFontSize: Float? = null
+
     val hasActiveTextInput: Boolean get() = textInputView != null
+    val hasPendingText: Boolean get() = pendingText != null || pendingNewTextPoint != null
+
+    // Convert screen touch coordinates to content coordinates
+    var screenToContentConverter: ((MotionEvent) -> PointF)? = null
+    // Convert content coordinates back to screen (hostView) coordinates
+    var contentToScreenConverter: ((PointF) -> PointF)? = null
+
+    private fun screenToContent(event: MotionEvent): PointF {
+        return screenToContentConverter?.invoke(event) ?: PointF(event.x, event.y)
+    }
+
+    private fun contentToScreen(contentPoint: PointF): PointF {
+        return contentToScreenConverter?.invoke(contentPoint) ?: contentPoint
+    }
 
     /**
      * Handle touch in text mode. Returns true if touch was consumed.
      */
     fun handleTouchDown(event: MotionEvent): Boolean {
-        val delegate = delegate ?: run {
-            android.util.Log.d("PDFText", "handleTouchDown: no delegate!")
-            return false
-        }
-        val contentContainer = delegate.textHandlerContentContainer
-        android.util.Log.d("PDFText", "handleTouchDown: eventXY=(${event.x}, ${event.y}), hasInput=${textInputView != null}")
+        val delegate = delegate ?: return false
+        android.util.Log.d("PdfText", "handleTouchDown: xy=(${event.x}, ${event.y}), hasInput=${textInputView != null}")
+
+        // Clear any stale pending state from previous gesture
+        if (hasPendingText) clearPending()
 
         // If there's a text input view, check if touch is outside it
         val existingInput = textInputView
@@ -101,21 +128,54 @@ class TextAnnotationHandler(private val context: Context) {
         val normalizedY = (contentPoint.y - pageRect.top) / pageRect.height()
         val normalizedPoint = PointF(normalizedX, normalizedY)
 
-        // Check if touching existing text (start drag)
+        // Check if touching existing text — defer to detect tap vs drag
         val hitResult = hitTestTextAnnotation(normalizedPoint, page)
         if (hitResult != null) {
             val (_, textAnnotation) = hitResult
-            startDraggingText(textAnnotation, page, event)
+            pendingText = textAnnotation
+            pendingTextPage = page
+            pendingTouchStartX = event.x
+            pendingTouchStartY = event.y
+            android.util.Log.d("PdfText", "handleTouchDown: pendingText='${textAnnotation.str}'")
             return true
         }
 
-        // Show text input at the touch position
-        android.util.Log.d("PDFText", "showing text input: normalized=($normalizedX, $normalizedY), page=$page, eventXY=(${event.x}, ${event.y})")
-        showTextInput(normalizedPoint, page, event)
+        // No existing text — defer until touchUp to avoid opening on multi-finger
+        pendingNewTextPoint = normalizedPoint
+        pendingNewTextEvent = MotionEvent.obtain(event)
+        pendingTextPage = page
+        pendingTouchStartX = event.x
+        pendingTouchStartY = event.y
+        android.util.Log.d("PdfText", "handleTouchDown: pendingNewText at ($normalizedX, $normalizedY)")
         return true
     }
 
     fun handleTouchMove(event: MotionEvent): Boolean {
+        val delegate = delegate ?: return false
+
+        // Pending new text — cancel if finger moves (scroll/zoom gesture)
+        if (pendingNewTextPoint != null) {
+            val dist = hypot(event.x - pendingTouchStartX, event.y - pendingTouchStartY)
+            if (dist >= dragThreshold) {
+                android.util.Log.d("PdfText", "handleTouchMove: pendingNew cancelled (moved $dist)")
+                pendingWasMultiTouch = true
+                clearPending()
+            }
+            return true
+        }
+
+        // Pending existing text — check if finger moved enough to start drag
+        val text = pendingText
+        if (text != null) {
+            val dist = hypot(event.x - pendingTouchStartX, event.y - pendingTouchStartY)
+            if (dist >= dragThreshold) {
+                android.util.Log.d("PdfText", "handleTouchMove: starting drag for '${text.str}' (dist=$dist)")
+                startDraggingText(text, pendingTextPage, event)
+                clearPending()
+            }
+            return true
+        }
+
         if (!isDraggingText) return false
         val label = draggingLabel ?: return false
 
@@ -126,68 +186,141 @@ class TextAnnotationHandler(private val context: Context) {
     }
 
     fun handleTouchUp(event: MotionEvent): Boolean {
+        // Pending existing text, no drag → tap to edit
+        val text = pendingText
+        if (text != null) {
+            android.util.Log.d("PdfText", "handleTouchUp: tap → editExistingText '${text.str}'")
+            editExistingText(text, pendingTextPage)
+            clearPending()
+            return true
+        }
+
+        // Pending new text → tap to create
+        val point = pendingNewTextPoint
+        val ev = pendingNewTextEvent
+        if (point != null && ev != null) {
+            android.util.Log.d("PdfText", "handleTouchUp: tap → showTextInput at ($${point.x}, ${point.y})")
+            showTextInput(point, pendingTextPage, ev)
+            clearPending()
+            return true
+        }
+
         if (!isDraggingText) return false
+        android.util.Log.d("PdfText", "handleTouchUp: finishDrag")
         finishDraggingText(event)
         return true
     }
 
     fun handleTouchCancel() {
+        android.util.Log.d("PdfText", "handleTouchCancel: pendingText=${pendingText != null}, pendingNew=${pendingNewTextPoint != null}, dragging=$isDraggingText, multiTouch=$pendingWasMultiTouch")
+        // Pending existing text cancelled (single finger) → treat as tap to edit
+        val text = pendingText
+        if (text != null && !pendingWasMultiTouch) {
+            android.util.Log.d("PdfText", "handleTouchCancel: → editExistingText '${text.str}'")
+            editExistingText(text, pendingTextPage)
+            clearPending()
+            return
+        }
+
+        // Pending new text cancelled — only open if not multi-touch
+        val point = pendingNewTextPoint
+        val ev = pendingNewTextEvent
+        if (point != null && ev != null && !pendingWasMultiTouch) {
+            android.util.Log.d("PdfText", "handleTouchCancel: → showTextInput (single finger cancel)")
+            showTextInput(point, pendingTextPage, ev)
+            clearPending()
+            return
+        }
+
+        if (hasPendingText) {
+            android.util.Log.d("PdfText", "handleTouchCancel: clearing pending (multiTouch)")
+            clearPending()
+            return
+        }
+
         if (!isDraggingText) return
         // Restore text at original position
-        val text = draggingText
-        val delegate = delegate
-        if (text != null && delegate != null) {
-            delegate.textHandlerDrawingController.addText(text, draggingTextPage)
-            delegate.textHandlerRedrawOverlay()
+        val dragText = draggingText
+        val del = delegate
+        if (dragText != null && del != null) {
+            del.textHandlerDrawingController.addText(dragText, draggingTextPage)
+            del.textHandlerRedrawOverlay()
         }
         cancelDraggingText()
     }
 
-    // Convert screen touch coordinates to content coordinates
-    var screenToContentConverter: ((MotionEvent) -> PointF)? = null
-    // Convert content coordinates back to screen (hostView) coordinates
-    var contentToScreenConverter: ((PointF) -> PointF)? = null
-
-    private fun screenToContent(event: MotionEvent): PointF {
-        return screenToContentConverter?.invoke(event) ?: PointF(event.x, event.y)
+    fun handleMultiTouchDetected() {
+        pendingWasMultiTouch = true
+        clearPending()
     }
 
-    private fun contentToScreen(contentPoint: PointF): PointF {
-        return contentToScreenConverter?.invoke(contentPoint) ?: contentPoint
+    private fun clearPending() {
+        pendingText = null
+        pendingNewTextEvent?.recycle()
+        pendingNewTextEvent = null
+        pendingNewTextPoint = null
+        pendingWasMultiTouch = false
+    }
+
+    // MARK: - Edit Existing Text
+
+    private fun editExistingText(text: DrawingText, page: Int) {
+        val delegate = delegate ?: return
+        android.util.Log.d("PdfText", "editExistingText: '${text.str}' page=$page fontSize=${text.fontSize} color=${text.color}")
+
+        // Remove text so it doesn't render while editing
+        delegate.textHandlerDrawingController.removeText(text.id, page)
+        delegate.textHandlerRedrawOverlay()
+
+        val normalizedPoint = PointF(text.point[0], text.point[1])
+        editingTextId = text.id
+        editingTextColor = text.color
+        editingTextFontSize = text.fontSize
+
+        // Convert text position to screen coordinates for the EditText
+        val pageRect = delegate.textHandlerContentRectForPage(page)
+        val contentX = pageRect.left + text.point[0] * pageRect.width()
+        val contentY = pageRect.top + text.point[1] * pageRect.height()
+        val screenPos = contentToScreen(PointF(contentX, contentY))
+        val fakeEvent = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, screenPos.x, screenPos.y, 0)
+
+        showTextInput(normalizedPoint, page, fakeEvent, text.str, text.color, text.fontSize)
+        fakeEvent.recycle()
     }
 
     // MARK: - Text Input
 
-    private fun showTextInput(normalizedPoint: PointF, page: Int, event: MotionEvent) {
+    private fun showTextInput(normalizedPoint: PointF, page: Int, event: MotionEvent,
+                              existingText: String? = null, color: String? = null, fontSize: Float? = null) {
         val delegate = delegate ?: return
+        android.util.Log.d("PdfText", "showTextInput: norm=(${normalizedPoint.x}, ${normalizedPoint.y}) page=$page existing='$existingText' fontSize=$fontSize color=$color zoomScale=${delegate.textHandlerZoomScale}")
 
         textInputPage = page
         textInputNormalizedPoint = normalizedPoint
 
-        val pageRect = delegate.textHandlerContentRectForPage(page)
         val hostView = delegate.textHandlerHostView
         val zoomScale = delegate.textHandlerZoomScale
+        val useFontSize = fontSize ?: textFontSize
+        val useColor = color ?: textColor
 
-        // Use the touch event position directly — it's already in the hostView coordinate space
         val screenX = event.x
         val screenY = event.y
 
-        val density = context.resources.displayMetrics.density
         val editText = EditText(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            textSize = textFontSize * zoomScale
-            setTextColor(try { Color.parseColor(textColor) } catch (e: Exception) { Color.BLUE })
+            textSize = useFontSize * zoomScale
+            setTextColor(try { Color.parseColor(useColor) } catch (e: Exception) { Color.BLUE })
             setPadding(0, 0, 0, 0)
             gravity = Gravity.TOP or Gravity.START
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            maxLines = 10
-
-            setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == EditorInfo.IME_ACTION_DONE) {
-                    commitTextInput()
-                    true
-                } else false
+            // Multi-line, no auto-suggestions, no word-wrap
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            // Allow horizontal scrolling (no word-wrap)
+            setHorizontallyScrolling(true)
+            maxLines = Int.MAX_VALUE
+            isSingleLine = false
+            if (existingText != null) {
+                setText(existingText)
+                setSelection(existingText.length)
             }
         }
 
@@ -197,7 +330,6 @@ class TextAnnotationHandler(private val context: Context) {
         lp.topMargin = screenY.toInt()
 
         hostView.addView(editText, lp)
-        // Manually measure and layout for RN views (Yoga doesn't handle dynamic children)
         editText.measure(
             View.MeasureSpec.makeMeasureSpec(maxWidthScreen, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -205,7 +337,20 @@ class TextAnnotationHandler(private val context: Context) {
         editText.layout(lp.leftMargin, lp.topMargin, lp.leftMargin + editText.measuredWidth, lp.topMargin + editText.measuredHeight)
         editText.bringToFront()
         editText.requestFocus()
-        android.util.Log.d("PDFText", "showTextInput: screenXY=($screenX, $screenY), maxWidth=$maxWidthScreen, measuredW=${editText.measuredWidth}, measuredH=${editText.measuredHeight}, hostView=${hostView.javaClass.simpleName}")
+
+        // Re-measure on text change so height grows with newlines
+        editText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                editText.post {
+                    val lineHeight = editText.lineHeight
+                    val lineCount = editText.lineCount.coerceAtLeast(1)
+                    val newHeight = lineCount * lineHeight + editText.paddingTop + editText.paddingBottom
+                    editText.layout(lp.leftMargin, lp.topMargin, lp.leftMargin + maxWidthScreen, lp.topMargin + newHeight)
+                }
+            }
+        })
 
         // Show keyboard
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -219,6 +364,7 @@ class TextAnnotationHandler(private val context: Context) {
         val delegate = delegate ?: return
 
         val text = editText.text?.toString()?.trim() ?: ""
+        android.util.Log.d("PdfText", "commitTextInput: text='$text' editingId=$editingTextId editingFontSize=$editingTextFontSize")
 
         // Hide keyboard
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -227,12 +373,22 @@ class TextAnnotationHandler(private val context: Context) {
         (editText.parent as? ViewGroup)?.removeView(editText)
         textInputView = null
 
+        val existingId = editingTextId
+        val existingColor = editingTextColor ?: textColor
+        val existingFontSize = editingTextFontSize
+        editingTextId = null
+        editingTextColor = null
+        editingTextFontSize = null
+
         if (text.isEmpty()) return
 
+        val useFontSize = existingFontSize ?: textFontSize
+        val useColor = if (existingId != null) existingColor else textColor
+        android.util.Log.d("PdfText", "commitTextInput: saving id=${existingId ?: "new"} fontSize=$useFontSize color=$useColor lines=${text.count { it == '\n' } + 1}")
         val drawingText = DrawingText(
-            id = UUID.randomUUID().toString(),
-            color = textColor,
-            fontSize = textFontSize,
+            id = existingId ?: UUID.randomUUID().toString(),
+            color = useColor,
+            fontSize = useFontSize,
             point = listOf(textInputNormalizedPoint.x, textInputNormalizedPoint.y),
             str = text
         )
@@ -248,6 +404,7 @@ class TextAnnotationHandler(private val context: Context) {
         val texts = delegate.textHandlerDrawingController.getTexts(page)
         val pageRect = delegate.textHandlerContentRectForPage(page)
         if (pageRect.isEmpty) return null
+        android.util.Log.d("PdfText", "hitTest: tap=(${normalizedPoint.x}, ${normalizedPoint.y}) page=$page textsCount=${texts.size} pageRect=$pageRect")
 
         for ((index, text) in texts.withIndex()) {
             if (text.point.size < 2) continue
@@ -255,13 +412,20 @@ class TextAnnotationHandler(private val context: Context) {
             val textX = text.point[0]
             val textY = text.point[1]
 
-            val paint = Paint().apply {
+            val paint = android.text.TextPaint().apply {
                 textSize = text.fontSize * context.resources.displayMetrics.density
                 isAntiAlias = true
             }
-            val textWidth = paint.measureText(text.str)
-            val normalizedWidth = textWidth / pageRect.width()
-            val normalizedHeight = (text.fontSize * context.resources.displayMetrics.density) / pageRect.height()
+            val layout = android.text.StaticLayout.Builder.obtain(text.str, 0, text.str.length, paint, 100000)
+                .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .build()
+            var maxLineWidth = 0f
+            for (i in 0 until layout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, layout.getLineWidth(i))
+            }
+            val normalizedWidth = maxLineWidth / pageRect.width()
+            val normalizedHeight = layout.height.toFloat() / pageRect.height()
 
             val padding = 0.02f
             val hitRect = RectF(
@@ -271,7 +435,9 @@ class TextAnnotationHandler(private val context: Context) {
                 textY + normalizedHeight + padding * 2
             )
 
-            if (hitRect.contains(normalizedPoint.x, normalizedPoint.y)) {
+            val hit = hitRect.contains(normalizedPoint.x, normalizedPoint.y)
+            android.util.Log.d("PdfText", "hitTest: text[$index]='${text.str}' pos=(${textX},${textY}) nSize=(${normalizedWidth},${normalizedHeight}) hitRect=$hitRect hit=$hit")
+            if (hit) {
                 return Pair(index, text)
             }
         }
@@ -282,7 +448,6 @@ class TextAnnotationHandler(private val context: Context) {
 
     private fun startDraggingText(textAnnotation: DrawingText, page: Int, event: MotionEvent) {
         val delegate = delegate ?: return
-        android.util.Log.d("PDFText", "startDraggingText: text='${textAnnotation.str}', page=$page, eventXY=(${event.x}, ${event.y})")
 
         isDraggingText = true
         draggingTextPage = page
@@ -295,10 +460,8 @@ class TextAnnotationHandler(private val context: Context) {
         val zoomScale = delegate.textHandlerZoomScale
         val pageRect = delegate.textHandlerContentRectForPage(page)
         val hostView = delegate.textHandlerHostView
-        val contentContainer = delegate.textHandlerContentContainer
-        val density = context.resources.displayMetrics.density
 
-        // Create floating label
+        // Create floating label (multi-line)
         val label = TextView(context).apply {
             text = textAnnotation.str
             textSize = textAnnotation.fontSize * zoomScale
@@ -306,20 +469,18 @@ class TextAnnotationHandler(private val context: Context) {
                 (try { Color.parseColor(textAnnotation.color) } catch (e: Exception) { Color.BLUE })
                     .let { Color.argb(180, Color.red(it), Color.green(it), Color.blue(it)) }
             )
-            setBackgroundColor(Color.argb(50, 255, 0, 0)) // DEBUG: red tint to verify visibility
+            setBackgroundColor(Color.TRANSPARENT)
         }
 
-        // Convert text position from content to screen (hostView) coordinates
+        // Convert text position from content to screen coordinates
         val contentX = pageRect.left + textAnnotation.point[0] * pageRect.width()
         val contentY = pageRect.top + textAnnotation.point[1] * pageRect.height()
         val screenPos = contentToScreen(PointF(contentX, contentY))
         val screenX = screenPos.x
         val screenY = screenPos.y
 
-        // PagingPdfView is a RN view (Yoga layout) — dynamic children don't get measured.
-        // Manually measure and layout the label.
-        val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(hostView.width, android.view.View.MeasureSpec.AT_MOST)
-        val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED)
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(hostView.width, View.MeasureSpec.AT_MOST)
+        val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         label.measure(widthSpec, heightSpec)
         val lw = label.measuredWidth
         val lh = label.measuredHeight
@@ -330,26 +491,19 @@ class TextAnnotationHandler(private val context: Context) {
         hostView.addView(label, lp)
         label.layout(left, top, left + lw, top + lh)
         label.bringToFront()
-        android.util.Log.d("PDFText", "startDraggingText: screenXY=($screenX, $screenY), contentXY=($contentX, $contentY), zoomScale=$zoomScale, labelSize=${lw}x${lh}, hostViewSize=(${hostView.width}x${hostView.height})")
 
         draggingTouchOffsetX = event.x - screenX
         draggingTouchOffsetY = event.y - screenY
         draggingLabel = label
-
-        label.post {
-            android.util.Log.d("PDFText", "label post-layout: width=${label.width}, height=${label.height}, visibility=${label.visibility}, alpha=${label.alpha}, attached=${label.isAttachedToWindow}, parent=${label.parent?.javaClass?.simpleName}, parentChildCount=${(label.parent as? ViewGroup)?.childCount}, indexInParent=${(label.parent as? ViewGroup)?.indexOfChild(label)}")
-        }
     }
 
     private fun finishDraggingText(event: MotionEvent) {
         val text = draggingText ?: return
         val delegate = delegate ?: run { cancelDraggingText(); return }
 
-        // Convert final screen position back to content coordinates using the converter
         val labelX = event.x - draggingTouchOffsetX
         val labelY = event.y - draggingTouchOffsetY
 
-        // Create a fake MotionEvent at the label position to reuse screenToContentConverter
         val contentPoint = screenToContentConverter?.invoke(
             MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, labelX, labelY, 0)
         ) ?: PointF(labelX, labelY)

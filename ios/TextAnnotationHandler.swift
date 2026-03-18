@@ -75,6 +75,9 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
             return false // touch inside text view, let it handle
         }
 
+        // Clear any stale pending state from previous gesture
+        if hasPendingText { clearPending() }
+
         let location = touch.location(in: contentContainer)
         let page = delegate.textHandlerPageForPoint(location)
         let pageRect = delegate.textHandlerContentRectForPage(page)
@@ -170,6 +173,7 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
     func handleMultiTouchDetected() {
         // Called by callers when 2+ fingers detected — ensures pending new text won't open
         pendingWasMultiTouch = true
+        clearPending()
     }
 
     func handleTouchCancelled() {

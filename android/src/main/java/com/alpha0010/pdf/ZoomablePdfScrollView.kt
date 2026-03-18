@@ -352,6 +352,7 @@ class ZoomablePdfScrollView(context: Context, pdfMutex: Lock) : PdfViewerBase(co
                     if (drawingController.isDrawing) {
                         drawingController.handleTouchCancelled()
                     }
+                    textAnnotationHandler.handleMultiTouchDetected()
                     mDrawingCancelledByMultiTouch = true
                     mLastMultiTouchY = averageTouchY(event)
                 }

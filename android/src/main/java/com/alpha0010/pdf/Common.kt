@@ -421,13 +421,20 @@ class DrawingController {
             val textX = text.point[0]
             val textY = text.point[1]
 
-            val paint = Paint().apply {
+            val paint = android.text.TextPaint().apply {
                 textSize = text.fontSize
                 isAntiAlias = true
             }
-            val textWidth = paint.measureText(text.str)
-            val normalizedWidth = if (contentRect.width() > 0) textWidth / contentRect.width() else 0f
-            val normalizedHeight = if (contentRect.height() > 0) text.fontSize / contentRect.height() else 0f
+            val layout = android.text.StaticLayout.Builder.obtain(text.str, 0, text.str.length, paint, 100000)
+                .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .build()
+            var maxLineWidth = 0f
+            for (i in 0 until layout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, layout.getLineWidth(i))
+            }
+            val normalizedWidth = if (contentRect.width() > 0) maxLineWidth / contentRect.width() else 0f
+            val normalizedHeight = if (contentRect.height() > 0) layout.height.toFloat() / contentRect.height() else 0f
 
             val padding = 0.02f
             val hitRect = RectF(

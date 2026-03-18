@@ -522,6 +522,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
                     if (controller.isDrawing) {
                         controller.handleTouchCancelled()
                     }
+                    textAnnotationHandler?.handleMultiTouchDetected()
                     drawingCancelledByMultiTouch = true
                     lastMultiTouchY = averageTouchY(event)
                 }
