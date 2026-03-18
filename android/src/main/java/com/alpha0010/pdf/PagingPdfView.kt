@@ -121,6 +121,7 @@ class PagingPdfView(context: Context, pdfMutex: Lock) : PdfViewerBase(context, p
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        android.util.Log.d("PdfText", "PagingPdfView.onSizeChanged: w=$w h=$h oldw=$oldw oldh=$oldh prevWidth=$mPreviousWidth")
 
         if (w <= 0 || h <= 0) return
 
@@ -485,13 +486,65 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun updateScrollViewPadding() {
+        // Padding must be enough to scroll all zoomed content.
+        // Needed: (content + padding) - viewport >= content - viewport/scale
+        // → padding >= viewport * (1 - 1/scale)
         val zoomExtraPadding = if (isZoomed && height > 0) {
-            (height * (scale - 1) * 0.25f).toInt()
+            (height * (1f - 1f / scale)).toInt()
         } else 0
 
         if (scrollView.paddingBottom != zoomExtraPadding) {
             scrollView.setPadding(0, 0, 0, zoomExtraPadding)
             scrollView.clipToPadding = false
+        }
+    }
+
+    // Saved zoom state before keyboard shows
+    private var preKeyboardScrollY: Int? = null
+    private var preKeyboardScale: Float? = null
+    private var preKeyboardOffsetX: Float? = null
+    private var isKeyboardVisible = false
+
+    /** Call before showing keyboard to save zoom state */
+    fun saveZoomStateForKeyboard() {
+        if (isZoomed) {
+            preKeyboardScrollY = scrollView.scrollY
+            preKeyboardScale = scale
+            preKeyboardOffsetX = offsetX
+            android.util.Log.d("PdfText", "saveZoomState: scroll=$preKeyboardScrollY scale=$scale offsetX=$offsetX")
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (oldw == w && oldh > 0 && h < oldh) {
+            isKeyboardVisible = true
+            android.util.Log.d("PdfText", "ZPV.onSizeChanged: keyboard SHOW h=$oldh→$h saved=${preKeyboardScrollY}")
+        } else if (oldw == w && oldh > 0 && h > oldh && isKeyboardVisible) {
+            isKeyboardVisible = false
+            android.util.Log.d("PdfText", "ZPV.onSizeChanged: keyboard HIDE h=$oldh→$h saved=${preKeyboardScrollY} scrollY=${scrollView.scrollY}")
+        }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (!isKeyboardVisible && preKeyboardScrollY != null) {
+            val ss = preKeyboardScrollY!!
+            val sc = preKeyboardScale ?: scale
+            val ox = preKeyboardOffsetX ?: offsetX
+            android.util.Log.d("PdfText", "ZPV.onLayout: RESTORING scroll=$ss scale=$sc offsetX=$ox currentScroll=${scrollView.scrollY}")
+            preKeyboardScrollY = null
+            preKeyboardScale = null
+            preKeyboardOffsetX = null
+            scale = sc
+            offsetX = ox
+            applyTransform()
+            updateScrollViewPadding()
+            // Must post to run AFTER NestedScrollView finishes its own layout
+            scrollView.post {
+                scrollView.scrollTo(0, ss)
+                android.util.Log.d("PdfText", "ZPV.onLayout post: scrollTo=$ss actual=${scrollView.scrollY}")
+            }
         }
     }
 
@@ -599,11 +652,13 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
             setupTextHandler()
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    saveZoomStateForKeyboard()
                     parent?.requestDisallowInterceptTouchEvent(true)
                     textAnnotationHandler?.handleTouchDown(event)
                 }
                 MotionEvent.ACTION_MOVE -> textAnnotationHandler?.handleTouchMove(event)
                 MotionEvent.ACTION_UP -> {
+                    saveZoomStateForKeyboard()
                     parent?.requestDisallowInterceptTouchEvent(false)
                     textAnnotationHandler?.handleTouchUp(event)
                 }
@@ -650,6 +705,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     fun setImage(bitmap: Bitmap?, parentWidth: Int = 0) {
+        android.util.Log.d("PdfText", "ZoomablePageView.setImage: bitmap=${bitmap != null} scale=$scale", Exception("stack"))
         val shouldScroll = shouldScrollToBottomOnLoad && bitmap != null
 
         if (shouldScroll) {
@@ -759,6 +815,7 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     fun resetState() {
+        android.util.Log.d("PdfText", "ZoomablePageView.resetState called", Exception("stack"))
         zoomAnimator?.cancel()
         scale = minZoom
         offsetX = 0f
