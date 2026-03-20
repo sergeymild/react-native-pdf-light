@@ -92,28 +92,38 @@ class PdfPageRenderer {
 
                     // Draw strokes
                     for stroke in annotation.strokes {
-                        guard stroke.path.count >= 2 else { continue }
+                        guard stroke.path.count >= 1 else { continue }
 
                         let color = UIColor(hexString: stroke.color) ?? .black
-                        ctx.setStrokeColor(color.cgColor)
+                        let alpha = stroke.opacity ?? 1.0
+                        let strokeColor = color.withAlphaComponent(alpha)
                         ctx.setLineWidth(stroke.width * scale)
                         ctx.setLineCap(.round)
                         ctx.setLineJoin(.round)
 
-                        let path = CGMutablePath()
-                        for (index, point) in stroke.path.enumerated() {
-                            guard point.count >= 2 else { continue }
-                            // Convert normalized coordinates (0-1) to render coordinates
+                        if stroke.path.count == 1, let point = stroke.path.first, point.count >= 2 {
+                            // Single point — draw a dot
                             let x = point[0] * renderSize.width
                             let y = point[1] * renderSize.height
-                            if index == 0 {
-                                path.move(to: CGPoint(x: x, y: y))
-                            } else {
-                                path.addLine(to: CGPoint(x: x, y: y))
+                            let radius = stroke.width * scale / 2.0
+                            ctx.setFillColor(strokeColor.cgColor)
+                            ctx.fillEllipse(in: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2))
+                        } else {
+                            ctx.setStrokeColor(strokeColor.cgColor)
+                            let path = CGMutablePath()
+                            for (index, point) in stroke.path.enumerated() {
+                                guard point.count >= 2 else { continue }
+                                let x = point[0] * renderSize.width
+                                let y = point[1] * renderSize.height
+                                if index == 0 {
+                                    path.move(to: CGPoint(x: x, y: y))
+                                } else {
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                }
                             }
+                            ctx.addPath(path)
+                            ctx.strokePath()
                         }
-                        ctx.addPath(path)
-                        ctx.strokePath()
                     }
 
                     // Draw text annotations

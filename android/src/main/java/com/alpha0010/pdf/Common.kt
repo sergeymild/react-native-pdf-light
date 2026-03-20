@@ -684,30 +684,43 @@ object PdfPageRenderer {
 
                     // Draw strokes
                     for (stroke in annotation.strokes) {
-                        if (stroke.path.size < 2) continue
+                        if (stroke.path.isEmpty()) continue
 
                         val paint = Paint().apply {
                             color = parseColor(stroke.color)
+                            alpha = (stroke.opacity * 255).toInt().coerceIn(0, 255)
                             strokeWidth = stroke.width * 2 // Scale for density
-                            style = Paint.Style.STROKE
                             strokeCap = Paint.Cap.ROUND
                             strokeJoin = Paint.Join.ROUND
                             isAntiAlias = true
                         }
 
-                        val path = Path()
-                        stroke.path.forEachIndexed { index, point ->
+                        if (stroke.path.size == 1) {
+                            // Single point — draw a dot
+                            val point = stroke.path[0]
                             if (point.size >= 2) {
                                 val x = point[0] * viewWidth
                                 val y = point[1] * pageHeight
-                                if (index == 0) {
-                                    path.moveTo(x, y)
-                                } else {
-                                    path.lineTo(x, y)
+                                paint.style = Paint.Style.FILL
+                                val radius = stroke.width
+                                canvas.drawCircle(x, y, radius, paint)
+                            }
+                        } else {
+                            paint.style = Paint.Style.STROKE
+                            val path = Path()
+                            stroke.path.forEachIndexed { index, point ->
+                                if (point.size >= 2) {
+                                    val x = point[0] * viewWidth
+                                    val y = point[1] * pageHeight
+                                    if (index == 0) {
+                                        path.moveTo(x, y)
+                                    } else {
+                                        path.lineTo(x, y)
+                                    }
                                 }
                             }
+                            canvas.drawPath(path, paint)
                         }
-                        canvas.drawPath(path, paint)
                     }
 
                     // Draw text annotations
