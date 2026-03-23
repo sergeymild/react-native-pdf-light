@@ -637,6 +637,15 @@ fun parseColor(hexColor: String): Int {
 }
 
 /**
+ * Parses hex color string and applies opacity to produce an Android Color int.
+ */
+fun parseColorWithOpacity(hexColor: String, opacity: Float): Int {
+    val baseColor = parseColor(hexColor)
+    val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+    return Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
+}
+
+/**
  * Shared PDF page rendering utility.
  */
 object PdfPageRenderer {

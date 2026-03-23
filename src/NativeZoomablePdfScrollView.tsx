@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
+import type { AnnotationPage, PdfViewerRef } from './types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -34,28 +35,6 @@ export type ZoomablePdfZoomChangeEvent = { scale: number };
 
 export type ZoomablePdfTapEvent = {
   position: 'top' | 'bottom' | 'left' | 'right';
-};
-
-// --- Annotation Types ---
-
-export type AnnotationStroke = {
-  id?: string;
-  color: string;
-  width: number;
-  opacity?: number;
-  path: number[][];
-};
-
-export type AnnotationText = {
-  color: string;
-  fontSize: number;
-  point: number[];
-  str: string;
-};
-
-export type AnnotationPage = {
-  strokes: AnnotationStroke[];
-  text: AnnotationText[];
 };
 
 // --- Native Props ---
@@ -230,42 +209,7 @@ export type NativeZoomablePdfScrollViewProps_Public = {
 
 // --- Ref type ---
 
-export type NativeZoomablePdfScrollViewRef = {
-  /**
-   * Reset zoom to default (scale = 1).
-   */
-  resetZoom: () => void;
-
-  /**
-   * Scroll to specific page.
-   */
-  scrollToPage: (page: number, animated?: boolean) => void;
-
-  /**
-   * Clear strokes for a specific page or all pages.
-   * @param page Page index to clear, or -1 to clear all pages.
-   */
-  clearStrokes: (page?: number) => void;
-
-  /**
-   * Get all annotations (strokes and text) from all pages.
-   * Returns a promise with Record<pageIndex, { strokes, text }>.
-   * Annotations are stored natively - use this to retrieve them when needed.
-   */
-  getAnnotations: () => Promise<
-    Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
-  >;
-
-  /**
-   * Undo the last drawing action.
-   */
-  undo: () => void;
-
-  /**
-   * Redo the last undone action.
-   */
-  redo: () => void;
-};
+export type NativeZoomablePdfScrollViewRef = PdfViewerRef;
 
 // --- Native component ---
 

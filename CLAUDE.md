@@ -18,30 +18,29 @@ Both iOS (Swift) and Android (Kotlin).
 
 ### TypeScript (`src/`)
 - `index.ts` — Exports: PdfViewer, NativeZoomablePdfScrollView, drawing types/tools
-- `PdfViewer.tsx` — Unified component. Routes by `viewerType` prop. Defines AnnotationPage/Stroke/Text types.
-- `NativeZoomablePdfScrollView.tsx` — Zoomable wrapper. Ref: resetZoom, scrollToPage, clearStrokes, getAnnotations.
-- `NativePagingPdfView.tsx` — Paging wrapper. Similar API.
-- `drawing/types.ts` — DrawingMode, DrawingTool, DrawingStroke, DEFAULT_DRAWING_TOOL, DEFAULT_HIGHLIGHTER_TOOL
+- `types.ts` — Shared types: AnnotationStroke, AnnotationText, AnnotationPage, PdfViewerRef
+- `PdfViewer.tsx` — Unified component. Routes by `viewerType` prop. Re-exports annotation types from `types.ts`.
+- `NativeZoomablePdfScrollView.tsx` — Zoomable wrapper. Ref type aliases PdfViewerRef.
+- `NativePagingPdfView.tsx` — Paging wrapper. Ref type aliases PdfViewerRef.
+- `drawing/types.ts` — DrawingMode, DrawingTool, DrawingStroke, PageAnnotations, TextTool, DEFAULT_DRAWING_TOOL, DEFAULT_HIGHLIGHTER_TOOL, DEFAULT_TEXT_TOOL
 - `PdfUtil.ts` — getPageCount(), getPageSizes()
 
 ### iOS (`ios/`)
-- `ZoomablePdfScrollView.swift` — UIScrollView zoom + UICollectionView. DrawingOverlayView on content.
+- `ZoomablePdfScrollView.swift` — UIScrollView zoom + UICollectionView. DrawingOverlayView on content. Has `unscaledPageHeight` computed property.
 - `PagingPdfView.swift` — Horizontal paging. Per-page ZoomablePageView + DrawingOverlayView.
-- `DrawablePdfView.swift` — Single-page drawable view
 - `DrawingController.swift` — Touch handling, stroke storage (PageStrokes), erase, rendering (CGContext), export with RDP simplification
 - `DrawingOverlayView.swift` — CATiledLayer overlay. Single/multi-page modes. Handles touch in draw modes.
 - `DrawingTypes.swift` — DrawingMode enum, DrawingStroke struct, PageStrokes container
-- `Common.swift` — PdfPageRenderer (2x retina), UIColor hex ext. Draws static annotations onto bitmap.
+- `Common.swift` — PdfPageRenderer (2x retina), UIColor hex ext, CGPDFPage.effectiveDimensions extension. Draws static annotations onto bitmap.
 - `TextAnnotationHandler.swift` — Reusable text input/drag handler. Delegate pattern.
 - `AnnotationPage.swift` — PositionedText, Stroke, AnnotationPage (Decodable)
-- `*Manager.swift` / `*.m` / `*.h` — RN bridge
+- `*Manager.swift` / `*.m` — RN bridge
 
 ### Android (`android/src/main/java/com/alpha0010/pdf/`)
 - `ZoomablePdfScrollView.kt` — FrameLayout: RecyclerView + DrawingOverlayView (siblings). View scale transform zoom.
 - `PagingPdfView.kt` — ViewPager2. ZoomablePageView per page (NestedScrollView → ImageView + DrawingOverlayView).
-- `DrawablePdfView.kt` — Single-page with canvas transform zoom+drawing.
 - `DrawingOverlayView.kt` — drawSinglePage (Paging, inside scaled parent) and drawMultiPage (Zoomable, manual zoom calc). Also renders text annotations.
-- `Common.kt` — DrawingMode, DrawingStroke, DrawingText, PageStrokes, PageTexts, DrawingController, PdfPageRenderer, parseAnnotations()
+- `Common.kt` — DrawingMode, DrawingStroke, DrawingText, PageStrokes, PageTexts, DrawingController, PdfPageRenderer, parseAnnotations(), parseColor(), parseColorWithOpacity()
 - `TextAnnotationHandler.kt` — Reusable text input/drag/hit-test handler. Delegate pattern + coordinate converter lambdas.
 - `AnnotationPage.kt` — Data classes (Serializable)
 - `*Manager.kt` / `PdfViewPackage.kt` — RN bridge
@@ -77,7 +76,6 @@ Both iOS (Swift) and Android (Kotlin).
 | Zoomable | Android | **Sibling** of RecyclerView | Manual calc (zoomScale, offsetX, scrollOffset, recyclerPaddingTop) |
 | Paging | iOS | Inside per-page scroll content | Scroll view handles zoom |
 | Paging | Android | **Inside** per-page NestedScrollView | Parent view transform (inherits scale) |
-| Drawable | Android | N/A (same view draws everything) | Canvas translate+scale |
 
 ### Static annotations rendering
 - Baked into page bitmap in PdfPageRenderer (both platforms)
@@ -119,18 +117,25 @@ Both iOS (Swift) and Android (Kotlin).
 - `draggingTouchOffset` stored in hostView coords, converted via zoomScale on finish
 - Erase mode also deletes text annotations (hit-test in `DrawingController.eraseStroke`)
 
+## Shared Helpers
+- **iOS `CGPDFPage.effectiveDimensions`** (`Common.swift`) — returns `(width, height)` accounting for page rotation. Used by PdfPageRenderer, PdfViewerBase, PdfUtilModule.
+- **iOS `unscaledPageHeight`** (`ZoomablePdfScrollView.swift`) — computed property: `bounds.width * (pdfPageHeight / pdfPageWidth)`. Used throughout for page layout calculations.
+- **Android `parseColorWithOpacity()`** (`Common.kt`) — parses hex color and applies opacity. Used by DrawingOverlayView for stroke/text rendering.
+
 ## Props
 - `source` — file path to PDF
 - `viewerType` — 'zoomable' | 'paging'
 - `annotations` — AnnotationPage[] (static, baked into bitmap)
-- `drawingMode` — 'view' | 'draw' | 'erase' | 'highlight'
+- `drawingMode` — 'view' | 'draw' | 'erase' | 'highlight' | 'text'
 - `drawingTool` — { color, strokeWidth, opacity }
+- `textTool` — { color, fontSize }
 - `minZoom`/`maxZoom`, `edgeTapZone`, `backgroundColor`
 - `pdfPaddingTop`/`pdfPaddingBottom` (zoomable only)
-- Events: onLoadComplete, onPageChange, onZoomChange, onTap, onMiddleClick, onDrawingStart, onDrawingEnd, onStrokeEnd, onStrokeRemoved
-- Ref: `resetZoom()`, `scrollToPage()`, `clearStrokes(page)`, `getAnnotations()`
+- Events: onLoadComplete, onPageChange, onZoomChange, onTap, onMiddleClick, onDrawingStart, onDrawingEnd, onUndoStateChange
+- Ref: `resetZoom()`, `scrollToPage()`, `clearStrokes(page)`, `getAnnotations()`, `undo()`, `redo()`
 
 ## Build
 - react-native-builder-bob (commonjs, module, typescript)
 - iOS: Swift, min iOS 10, CocoaPods
 - Android: Kotlin, minSdk 21, coroutines, serialization, viewpager2, recyclerview
+- Peer dependencies: react, react-native, react-native-svg (optional)

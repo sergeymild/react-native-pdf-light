@@ -90,7 +90,6 @@ class TextAnnotationHandler(private val context: Context) {
      */
     fun handleTouchDown(event: MotionEvent): Boolean {
         val delegate = delegate ?: return false
-        android.util.Log.d("PdfText", "handleTouchDown: xy=(${event.x}, ${event.y}), hasInput=${textInputView != null}")
 
         // Clear any stale pending state from previous gesture
         if (hasPendingText) clearPending()
@@ -136,7 +135,6 @@ class TextAnnotationHandler(private val context: Context) {
             pendingTextPage = page
             pendingTouchStartX = event.x
             pendingTouchStartY = event.y
-            android.util.Log.d("PdfText", "handleTouchDown: pendingText='${textAnnotation.str}'")
             return true
         }
 
@@ -146,7 +144,6 @@ class TextAnnotationHandler(private val context: Context) {
         pendingTextPage = page
         pendingTouchStartX = event.x
         pendingTouchStartY = event.y
-        android.util.Log.d("PdfText", "handleTouchDown: pendingNewText at ($normalizedX, $normalizedY)")
         return true
     }
 
@@ -157,7 +154,6 @@ class TextAnnotationHandler(private val context: Context) {
         if (pendingNewTextPoint != null) {
             val dist = hypot(event.x - pendingTouchStartX, event.y - pendingTouchStartY)
             if (dist >= dragThreshold) {
-                android.util.Log.d("PdfText", "handleTouchMove: pendingNew cancelled (moved $dist)")
                 pendingWasMultiTouch = true
                 clearPending()
             }
@@ -169,7 +165,6 @@ class TextAnnotationHandler(private val context: Context) {
         if (text != null) {
             val dist = hypot(event.x - pendingTouchStartX, event.y - pendingTouchStartY)
             if (dist >= dragThreshold) {
-                android.util.Log.d("PdfText", "handleTouchMove: starting drag for '${text.str}' (dist=$dist)")
                 startDraggingText(text, pendingTextPage, event)
                 clearPending()
             }
@@ -189,7 +184,6 @@ class TextAnnotationHandler(private val context: Context) {
         // Pending existing text, no drag → tap to edit
         val text = pendingText
         if (text != null) {
-            android.util.Log.d("PdfText", "handleTouchUp: tap → editExistingText '${text.str}'")
             editExistingText(text, pendingTextPage)
             clearPending()
             return true
@@ -199,24 +193,20 @@ class TextAnnotationHandler(private val context: Context) {
         val point = pendingNewTextPoint
         val ev = pendingNewTextEvent
         if (point != null && ev != null) {
-            android.util.Log.d("PdfText", "handleTouchUp: tap → showTextInput at ($${point.x}, ${point.y})")
             showTextInput(point, pendingTextPage, ev)
             clearPending()
             return true
         }
 
         if (!isDraggingText) return false
-        android.util.Log.d("PdfText", "handleTouchUp: finishDrag")
         finishDraggingText(event)
         return true
     }
 
     fun handleTouchCancel() {
-        android.util.Log.d("PdfText", "handleTouchCancel: pendingText=${pendingText != null}, pendingNew=${pendingNewTextPoint != null}, dragging=$isDraggingText, multiTouch=$pendingWasMultiTouch")
         // Pending existing text cancelled (single finger) → treat as tap to edit
         val text = pendingText
         if (text != null && !pendingWasMultiTouch) {
-            android.util.Log.d("PdfText", "handleTouchCancel: → editExistingText '${text.str}'")
             editExistingText(text, pendingTextPage)
             clearPending()
             return
@@ -226,14 +216,12 @@ class TextAnnotationHandler(private val context: Context) {
         val point = pendingNewTextPoint
         val ev = pendingNewTextEvent
         if (point != null && ev != null && !pendingWasMultiTouch) {
-            android.util.Log.d("PdfText", "handleTouchCancel: → showTextInput (single finger cancel)")
             showTextInput(point, pendingTextPage, ev)
             clearPending()
             return
         }
 
         if (hasPendingText) {
-            android.util.Log.d("PdfText", "handleTouchCancel: clearing pending (multiTouch)")
             clearPending()
             return
         }
@@ -266,7 +254,6 @@ class TextAnnotationHandler(private val context: Context) {
 
     private fun editExistingText(text: DrawingText, page: Int) {
         val delegate = delegate ?: return
-        android.util.Log.d("PdfText", "editExistingText: '${text.str}' page=$page fontSize=${text.fontSize} color=${text.color}")
 
         // Remove text so it doesn't render while editing
         delegate.textHandlerDrawingController.removeText(text.id, page)
@@ -293,7 +280,6 @@ class TextAnnotationHandler(private val context: Context) {
     private fun showTextInput(normalizedPoint: PointF, page: Int, event: MotionEvent,
                               existingText: String? = null, color: String? = null, fontSize: Float? = null) {
         val delegate = delegate ?: return
-        android.util.Log.d("PdfText", "showTextInput: norm=(${normalizedPoint.x}, ${normalizedPoint.y}) page=$page existing='$existingText' fontSize=$fontSize color=$color zoomScale=${delegate.textHandlerZoomScale}")
 
         textInputPage = page
         textInputNormalizedPoint = normalizedPoint
@@ -364,7 +350,6 @@ class TextAnnotationHandler(private val context: Context) {
         val delegate = delegate ?: return
 
         val text = editText.text?.toString()?.trim() ?: ""
-        android.util.Log.d("PdfText", "commitTextInput: text='$text' editingId=$editingTextId editingFontSize=$editingTextFontSize")
 
         // Hide keyboard
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -384,7 +369,6 @@ class TextAnnotationHandler(private val context: Context) {
 
         val useFontSize = existingFontSize ?: textFontSize
         val useColor = if (existingId != null) existingColor else textColor
-        android.util.Log.d("PdfText", "commitTextInput: saving id=${existingId ?: "new"} fontSize=$useFontSize color=$useColor lines=${text.count { it == '\n' } + 1}")
         val drawingText = DrawingText(
             id = existingId ?: UUID.randomUUID().toString(),
             color = useColor,
@@ -404,7 +388,6 @@ class TextAnnotationHandler(private val context: Context) {
         val texts = delegate.textHandlerDrawingController.getTexts(page)
         val pageRect = delegate.textHandlerContentRectForPage(page)
         if (pageRect.isEmpty) return null
-        android.util.Log.d("PdfText", "hitTest: tap=(${normalizedPoint.x}, ${normalizedPoint.y}) page=$page textsCount=${texts.size} pageRect=$pageRect")
 
         for ((index, text) in texts.withIndex()) {
             if (text.point.size < 2) continue
@@ -435,9 +418,7 @@ class TextAnnotationHandler(private val context: Context) {
                 textY + normalizedHeight + padding * 2
             )
 
-            val hit = hitRect.contains(normalizedPoint.x, normalizedPoint.y)
-            android.util.Log.d("PdfText", "hitTest: text[$index]='${text.str}' pos=(${textX},${textY}) nSize=(${normalizedWidth},${normalizedHeight}) hitRect=$hitRect hit=$hit")
-            if (hit) {
+            if (hitRect.contains(normalizedPoint.x, normalizedPoint.y)) {
                 return Pair(index, text)
             }
         }

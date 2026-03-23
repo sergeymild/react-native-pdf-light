@@ -42,17 +42,7 @@ class PdfPageRenderer {
                 return
             }
 
-            let pageBounds = pdfPage.getBoxRect(.cropBox)
-            let pdfWidth: CGFloat
-            let pdfHeight: CGFloat
-
-            if pdfPage.rotationAngle % 180 == 90 {
-                pdfWidth = pageBounds.height
-                pdfHeight = pageBounds.width
-            } else {
-                pdfWidth = pageBounds.width
-                pdfHeight = pageBounds.height
-            }
+            let (pdfWidth, pdfHeight) = pdfPage.effectiveDimensions
 
             // Render at 2x for retina
             let scale: CGFloat = 2.0
@@ -140,6 +130,19 @@ class PdfPageRenderer {
                 completion(rendered)
             }
         }
+    }
+}
+
+// MARK: - CGPDFPage Extension
+
+extension CGPDFPage {
+    /// Returns (width, height) accounting for page rotation.
+    var effectiveDimensions: (width: CGFloat, height: CGFloat) {
+        let bounds = getBoxRect(.cropBox)
+        if rotationAngle % 180 == 90 {
+            return (width: bounds.height, height: bounds.width)
+        }
+        return (width: bounds.width, height: bounds.height)
     }
 }
 

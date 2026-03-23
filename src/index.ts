@@ -1,24 +1,3 @@
-// export {
-//   NativeDrawablePdfView,
-//   NativeDrawablePdfViewProps_Public as NativeDrawablePdfViewProps,
-//   NativeDrawablePdfViewRef,
-// } from './NativeDrawablePdfView';
-// export { DEFAULT_DRAWING_TOOL, DEFAULT_HIGHLIGHTER_TOOL } from './drawing';
-// export type {
-//   DrawingMode,
-//   DrawingStroke,
-//   DrawingTool,
-//   PageAnnotations,
-// } from './drawing';
-// export { PageDim, PdfUtil } from './PdfUtil';
-// export {
-//   NativeSimplePdfView,
-//   NativeSimplePdfViewProps_Public as NativeSimplePdfViewProps,
-//   NativeSimplePdfViewRef,
-//   ErrorEvent,
-//   LoadCompleteEvent,
-//   ZoomChangeEvent,
-// } from './NativeSimplePdfView';
 export {
   NativeZoomablePdfScrollView,
   NativeZoomablePdfScrollViewProps_Public as NativeZoomablePdfScrollViewProps,
@@ -57,4 +36,10 @@ export {
   DEFAULT_HIGHLIGHTER_TOOL,
   DEFAULT_TEXT_TOOL,
 } from './drawing/types';
-export type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
+export type {
+  DrawingMode,
+  DrawingStroke,
+  DrawingTool,
+  PageAnnotations,
+  TextTool,
+} from './drawing/types';
