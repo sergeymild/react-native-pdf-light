@@ -21,7 +21,6 @@ class PdfViewPackage : ReactPackage {
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
     return listOf<ViewManager<*, *>>(
-      DrawablePdfViewManager(pdfMutex),
       ZoomablePdfScrollViewManager(pdfMutex),
       PagingPdfViewManager(pdfMutex)
     )

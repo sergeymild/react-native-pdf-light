@@ -16,7 +16,7 @@ RCT_EXPORT_VIEW_PROPERTY(drawingMode, NSString)
 RCT_EXPORT_VIEW_PROPERTY(strokeColor, NSString)
 RCT_EXPORT_VIEW_PROPERTY(strokeWidth, CGFloat)
 RCT_EXPORT_VIEW_PROPERTY(strokeOpacity, CGFloat)
-RCT_EXPORT_VIEW_PROPERTY(strokes, NSString)
+
 
 // Events
 RCT_EXPORT_VIEW_PROPERTY(onPdfError, RCTDirectEventBlock)

@@ -94,7 +94,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
             pendingText = textAnnotation
             pendingTextPage = page
             pendingTouchStart = touch.location(in: delegate.textHandlerHostView)
-            NSLog("[PdfTextFlow] touchBegan: pendingText set for '%@'", textAnnotation.str)
             return true
         }
 
@@ -102,7 +101,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         pendingNewTextPoint = normalizedPoint
         pendingTextPage = page
         pendingTouchStart = touch.location(in: delegate.textHandlerHostView)
-        NSLog("[PdfTextFlow] touchBegan: pendingNewText at (%f, %f)", normalizedPoint.x, normalizedPoint.y)
         return true
     }
 
@@ -114,7 +112,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
             let location = touch.location(in: delegate.textHandlerHostView)
             let dist = hypot(location.x - pendingTouchStart.x, location.y - pendingTouchStart.y)
             if dist >= dragThreshold {
-                NSLog("[PdfTextFlow] touchMoved: pendingNew cancelled (moved %.1f)", dist)
                 pendingWasMultiTouch = true // finger moved = not a tap
                 clearPending()
             }
@@ -125,9 +122,7 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         if let text = pendingText {
             let location = touch.location(in: delegate.textHandlerHostView)
             let dist = hypot(location.x - pendingTouchStart.x, location.y - pendingTouchStart.y)
-            NSLog("[PdfTextFlow] touchMoved: pending dist=%.1f threshold=%.1f", dist, dragThreshold)
             if dist >= dragThreshold {
-                NSLog("[PdfTextFlow] touchMoved: starting drag for '%@'", text.str)
                 startDraggingText(
                     textAnnotation: text,
                     textIndex: 0,
@@ -151,7 +146,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
     func handleTouchEnded(_ touch: UITouch) {
         // If pending existing text and no drag started — this is a tap → edit
         if let text = pendingText {
-            NSLog("[PdfTextFlow] touchEnded: tap detected → editExistingText '%@'", text.str)
             editExistingText(text, page: pendingTextPage)
             clearPending()
             return
@@ -159,14 +153,12 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
 
         // If pending new text — this is a tap → show input
         if let point = pendingNewTextPoint {
-            NSLog("[PdfTextFlow] touchEnded: tap detected → showTextInput")
             showTextInput(at: point, page: pendingTextPage)
             clearPending()
             return
         }
 
         guard isDraggingText, let _ = delegate else { return }
-        NSLog("[PdfTextFlow] touchEnded: finishing drag")
         finishDraggingText(touch: touch)
     }
 
@@ -177,10 +169,8 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
     }
 
     func handleTouchCancelled() {
-        NSLog("[PdfTextFlow] touchCancelled: pendingText=%d pendingNew=%d dragging=%d", pendingText != nil ? 1 : 0, pendingNewTextPoint != nil ? 1 : 0, isDraggingText ? 1 : 0)
         // If pending existing text (finger didn't move enough to drag), treat cancel as tap → edit
         if let text = pendingText {
-            NSLog("[PdfTextFlow] touchCancelled: treating as tap → edit '%@'", text.str)
             editExistingText(text, page: pendingTextPage)
             clearPending()
             return
@@ -188,9 +178,8 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         // If pending new text: open input only if it wasn't a multi-touch/move gesture
         if let point = pendingNewTextPoint {
             if pendingWasMultiTouch {
-                NSLog("[PdfTextFlow] touchCancelled: pendingNew cancelled (was multi-touch)")
+                // multi-touch: don't open text input
             } else {
-                NSLog("[PdfTextFlow] touchCancelled: pendingNew → showTextInput (single finger cancel)")
                 showTextInput(at: point, page: pendingTextPage)
             }
             clearPending()
@@ -334,8 +323,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
         let pageRect = delegate.textHandlerContentRectForPage(page)
         guard !pageRect.isEmpty else { return nil }
 
-        NSLog("[PdfTextHit] tap=(%f, %f) page=%d textsCount=%d pageRect=(%f,%f,%f,%f)", normalizedPoint.x, normalizedPoint.y, page, texts.count, pageRect.origin.x, pageRect.origin.y, pageRect.width, pageRect.height)
-
         for (index, text) in texts.enumerated() {
             guard text.point.count >= 2 else { continue }
 
@@ -362,11 +349,6 @@ class TextAnnotationHandler: NSObject, UITextViewDelegate {
                 width: normalizedWidth + padding * 2,
                 height: normalizedHeight + padding * 2
             )
-
-            NSLog("[PdfTextHit] text[%d]='%@' pos=(%f,%f) size=(%f,%f) hitRect=(%f,%f,%f,%f) contains=%d",
-                  index, text.str, textX, textY, normalizedWidth, normalizedHeight,
-                  hitRect.origin.x, hitRect.origin.y, hitRect.width, hitRect.height,
-                  hitRect.contains(normalizedPoint) ? 1 : 0)
 
             if hitRect.contains(normalizedPoint) {
                 return (index, text)

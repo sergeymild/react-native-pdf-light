@@ -190,14 +190,9 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
         pdfDocument = document
 
         if let firstPage = document.page(at: 1) {
-            let pageBounds = firstPage.getBoxRect(.cropBox)
-            if firstPage.rotationAngle % 180 == 90 {
-                pdfPageWidth = pageBounds.height
-                pdfPageHeight = pageBounds.width
-            } else {
-                pdfPageWidth = pageBounds.width
-                pdfPageHeight = pageBounds.height
-            }
+            let dims = firstPage.effectiveDimensions
+            pdfPageWidth = dims.width
+            pdfPageHeight = dims.height
         }
 
         actualPageCount = document.numberOfPages

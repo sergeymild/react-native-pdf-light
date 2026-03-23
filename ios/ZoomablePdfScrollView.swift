@@ -9,6 +9,13 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     @objc var pdfPaddingTop: CGFloat = 0.0 { didSet { updateContentInset() } }
     @objc var pdfPaddingBottom: CGFloat = 0.0 { didSet { updateContentInset() } }
 
+    // MARK: - Computed Helpers
+
+    private var unscaledPageHeight: CGFloat {
+        guard pdfPageWidth > 0 else { return 0 }
+        return bounds.width * (pdfPageHeight / pdfPageWidth)
+    }
+
     // MARK: - Private State
 
     private let scrollView = UIScrollView()
@@ -161,7 +168,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         let maxOffset = scrollView.contentSize.height * scale - viewportHeight + inset.bottom
 
         guard pdfPageWidth > 0, pdfPageHeight > 0 else { return }
-        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth) * scale
+        let pageHeight = unscaledPageHeight * scale
 
         let isPortraitMode = bounds.height > bounds.width
         let currentOffset = scrollView.contentOffset.y
@@ -309,7 +316,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         }
 
         let viewWidth = bounds.width
-        let pageHeight = viewWidth * (pdfPageHeight / pdfPageWidth)
+        let pageHeight = unscaledPageHeight
         let totalHeight = pageHeight * CGFloat(actualPageCount)
 
         contentContainer.bounds = CGRect(x: 0, y: 0, width: viewWidth, height: totalHeight)
@@ -342,7 +349,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     private func pageIndexForPoint(_ point: CGPoint) -> Int {
         guard pdfPageWidth > 0, pdfPageHeight > 0, actualPageCount > 0 else { return 0 }
 
-        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        let pageHeight = unscaledPageHeight
         let pageIndex = Int(point.y / pageHeight)
         return max(0, min(pageIndex, actualPageCount - 1))
     }
@@ -350,7 +357,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     private func contentRectForPage(_ page: Int) -> CGRect {
         guard pdfPageWidth > 0, pdfPageHeight > 0 else { return .zero }
 
-        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        let pageHeight = unscaledPageHeight
         return CGRect(
             x: 0,
             y: CGFloat(page) * pageHeight,
@@ -411,8 +418,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
         }
 
         let viewWidth = bounds.width
-        let pageHeight = viewWidth * (pdfPageHeight / pdfPageWidth)
-        return CGSize(width: viewWidth, height: pageHeight)
+        return CGSize(width: viewWidth, height: unscaledPageHeight)
     }
 
     // MARK: - UIScrollViewDelegate
@@ -435,7 +441,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     private func updateCurrentPage() {
         guard bounds.width > 0, pdfPageWidth > 0, pdfPageHeight > 0, actualPageCount > 0 else { return }
 
-        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        let pageHeight = unscaledPageHeight
         let scale = scrollView.zoomScale
 
         let centerY = (scrollView.contentOffset.y + scrollView.bounds.height / 2) / scale
@@ -459,7 +465,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     override func scrollToPage(_ page: Int, animated: Bool) {
         guard page >= 0, page < actualPageCount else { return }
 
-        let pageHeight = bounds.width * (pdfPageHeight / pdfPageWidth)
+        let pageHeight = unscaledPageHeight
         let yOffset = CGFloat(page) * pageHeight
 
         scrollView.setContentOffset(CGPoint(x: 0, y: yOffset * scrollView.zoomScale), animated: animated)

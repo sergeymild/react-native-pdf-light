@@ -38,16 +38,7 @@ class PdfUtilModule: NSObject {
                 return
             }
 
-            let pageBounds = pdfPage.getBoxRect(.cropBox)
-            let pageHeight: CGFloat
-            let pageWidth: CGFloat
-            if pdfPage.rotationAngle % 180 == 90 {
-                pageHeight = pageBounds.width
-                pageWidth = pageBounds.height
-            } else {
-                pageHeight = pageBounds.height
-                pageWidth = pageBounds.width
-            }
+            let (pageWidth, pageHeight) = pdfPage.effectiveDimensions
 
             pages.append([
                 "height": pageHeight,
