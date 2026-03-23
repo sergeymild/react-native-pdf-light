@@ -585,7 +585,12 @@ class DrawingController {
                     "color": stroke.color,
                     "width": stroke.width,
                     "opacity": stroke.opacity,
-                    "path": simplifyPath(stroke.path)
+                    "path": {
+                        let originalCount = stroke.path.count
+                        let simplified = simplifyPath(stroke.path)
+                        print("[PDF Export] Page \(page) stroke: \(originalCount) points → \(simplified.count) points")
+                        return simplified
+                    }()
                 ]
                 strokesArray.append(strokeDict)
             }
@@ -614,7 +619,7 @@ class DrawingController {
 
     /// Simplify path using Ramer-Douglas-Peucker algorithm
     /// Removes points that don't contribute significantly to the shape
-    private func simplifyPath(_ path: [[CGFloat]], epsilon: CGFloat = 1.5) -> [[CGFloat]] {
+    private func simplifyPath(_ path: [[CGFloat]], epsilon: CGFloat = 0.002) -> [[CGFloat]] {
         guard path.count > 2 else { return path }
 
         // Convert to points for easier processing
