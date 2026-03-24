@@ -60,6 +60,103 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /seed?docId=xxx — generate test annotations for all 17 pages
+  if (req.method === 'GET' && url.pathname === '/seed') {
+    const PAGE_COUNT = 17;
+    const annotations = [];
+
+    for (let page = 0; page < PAGE_COUNT; page++) {
+      const offset = page / PAGE_COUNT; // vary positions per page
+
+      const strokes = [
+        // Drawing stroke 1: diagonal line
+        {
+          color: '#ff0000',
+          width: 2,
+          opacity: 1,
+          path: Array.from({ length: 20 }, (_, i) => [
+            0.1 + (i / 19) * 0.3,
+            (0.1 + offset * 0.05) + (i / 19) * 0.2,
+          ]),
+        },
+        // Drawing stroke 2: zigzag
+        {
+          color: '#0000ff',
+          width: 3,
+          opacity: 1,
+          path: Array.from({ length: 30 }, (_, i) => [
+            0.5 + (i / 29) * 0.4,
+            0.3 + Math.sin(i * 0.8) * 0.05 + offset * 0.02,
+          ]),
+        },
+        // Drawing stroke 3: curve
+        {
+          color: '#00aa00',
+          width: 2,
+          opacity: 1,
+          path: Array.from({ length: 25 }, (_, i) => [
+            0.05 + (i / 24) * 0.9,
+            0.7 + Math.sin(i * 0.3) * 0.08,
+          ]),
+        },
+        // Highlight stroke 1
+        {
+          color: '#FFC107',
+          width: 12,
+          opacity: 0.3,
+          path: [[0.05, 0.15 + offset * 0.03], [0.7, 0.15 + offset * 0.03]],
+        },
+        // Highlight stroke 2
+        {
+          color: '#FFC107',
+          width: 15,
+          opacity: 0.3,
+          path: [[0.05, 0.45], [0.85, 0.45]],
+        },
+        // Single-point stroke (dot)
+        {
+          color: '#9C27B0',
+          width: 5,
+          opacity: 1,
+          path: [[0.8, 0.1 + offset * 0.04]],
+        },
+      ];
+
+      const text = [
+        {
+          color: '#000000',
+          fontSize: 14,
+          point: [0.05, 0.05 + offset * 0.02],
+          str: `Page ${page + 1} annotation`,
+        },
+        {
+          color: '#ff0000',
+          fontSize: 18,
+          point: [0.4, 0.55],
+          str: 'Test note',
+        },
+        {
+          color: '#0000ff',
+          fontSize: 12,
+          point: [0.6, 0.85],
+          str: `Comment #${page + 1}`,
+        },
+      ];
+
+      annotations.push({ strokes, text });
+    }
+
+    store[docId] = annotations;
+
+    const strokeCount = annotations.reduce((s, p) => s + p.strokes.length, 0);
+    const textCount = annotations.reduce((s, p) => s + p.text.length, 0);
+    console.log(`[SEED] docId=${docId} -> ${PAGE_COUNT} pages, ${strokeCount} strokes, ${textCount} texts`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, pages: PAGE_COUNT, strokes: strokeCount, texts: textCount }));
+    return;
+  }
+
   res.writeHead(404);
   res.end(JSON.stringify({ error: 'Not found' }));
 });

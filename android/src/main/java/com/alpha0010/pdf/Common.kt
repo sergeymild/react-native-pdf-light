@@ -400,6 +400,7 @@ class DrawingController {
         val strokes = pageStrokes.getStrokes(page)
 
         for (stroke in strokes.reversed()) {
+            // Check distance to points
             for (strokePoint in stroke.path) {
                 val dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
                 if (dist < threshold) {
@@ -409,6 +410,23 @@ class DrawingController {
                         delegate?.onNeedsRedraw()
                     }
                     return
+                }
+            }
+
+            // Check distance to line segments between consecutive points
+            if (stroke.path.size >= 2) {
+                for (i in 0 until stroke.path.size - 1) {
+                    val a = stroke.path[i]
+                    val b = stroke.path[i + 1]
+                    val dist = distanceToSegment(point, a, b)
+                    if (dist < threshold) {
+                        if (pageStrokes.removeStroke(stroke.id, page)) {
+                            pushUndoAction(UndoAction.RemoveStroke(page, stroke))
+                            delegate?.onStrokeRemoved(stroke.id, page)
+                            delegate?.onNeedsRedraw()
+                        }
+                        return
+                    }
                 }
             }
         }
@@ -513,6 +531,19 @@ class DrawingController {
         }
 
         return result
+    }
+
+    // Distance from point to line segment (clamped to segment)
+    private fun distanceToSegment(point: PointF, segStart: PointF, segEnd: PointF): Float {
+        val dx = segEnd.x - segStart.x
+        val dy = segEnd.y - segStart.y
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared == 0f) return hypot(point.x - segStart.x, point.y - segStart.y)
+        val t = ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared
+        val clamped = t.coerceIn(0f, 1f)
+        val projX = segStart.x + clamped * dx
+        val projY = segStart.y + clamped * dy
+        return hypot(point.x - projX, point.y - projY)
     }
 
     // Path simplification using Ramer-Douglas-Peucker algorithm

@@ -319,6 +319,59 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
         return drawingController.getAnnotationsForExport()
     }
 
+    func loadAnnotations(_ json: String) {
+        guard !json.isEmpty,
+              let data = json.data(using: .utf8) else {
+            print("[loadAnnotations] Empty or invalid JSON")
+            return
+        }
+
+        do {
+            let pages = try JSONDecoder().decode([AnnotationPage].self, from: data)
+            print("[loadAnnotations] Parsed \(pages.count) pages")
+            drawingController.clearAllStrokes()
+            drawingController.clearAllTexts()
+
+            for (pageIndex, page) in pages.enumerated() {
+                let drawingStrokes = page.strokes.map { stroke in
+                    DrawingStroke(
+                        id: UUID().uuidString,
+                        color: stroke.color,
+                        width: stroke.width,
+                        opacity: stroke.opacity ?? 1.0,
+                        path: stroke.path
+                    )
+                }
+                drawingController.setStrokes(drawingStrokes, forPage: pageIndex)
+
+                for text in page.text {
+                    guard text.point.count >= 2 else { continue }
+                    let drawingText = DrawingText(
+                        id: UUID().uuidString,
+                        color: text.color,
+                        fontSize: text.fontSize,
+                        point: text.point,
+                        str: text.str
+                    )
+                    drawingController.addText(drawingText, toPage: pageIndex)
+                }
+
+                if !page.strokes.isEmpty || !page.text.isEmpty {
+                    print("[loadAnnotations] Page \(pageIndex): \(drawingStrokes.count) strokes, \(page.text.count) texts")
+                    if let first = drawingStrokes.first, let firstPoint = first.path.first {
+                        print("[loadAnnotations]   first stroke path[0]=\(firstPoint)")
+                    }
+                }
+            }
+            drawingController.clearUndoStack()
+            redrawCurrentOverlay()
+            print("[loadAnnotations] Done, overlay redrawn")
+        } catch {
+            print("[loadAnnotations] Parse error: \(error)")
+            onPdfError?(["message": "Failed to parse loadAnnotations: \(error.localizedDescription)"])
+        }
+    }
+
     func clearCache() {
         imageCache.removeAllObjects()
     }

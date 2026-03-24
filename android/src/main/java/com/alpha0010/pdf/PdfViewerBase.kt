@@ -46,6 +46,7 @@ object PdfViewerConstants {
     const val COMMAND_CLEAR_STROKES = 3
     const val COMMAND_UNDO = 4
     const val COMMAND_REDO = 5
+    const val COMMAND_LOAD_ANNOTATIONS = 6
 
     fun commandsMap(): Map<String, Int> {
         val map = mutableMapOf<String, Int>()
@@ -54,6 +55,7 @@ object PdfViewerConstants {
         map["clearStrokes"] = COMMAND_CLEAR_STROKES
         map["undo"] = COMMAND_UNDO
         map["redo"] = COMMAND_REDO
+        map["loadAnnotations"] = COMMAND_LOAD_ANNOTATIONS
         return map
     }
 
@@ -272,6 +274,41 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
 
     fun getAnnotations(): WritableMap {
         return drawingController.getAnnotationsForExport()
+    }
+
+    fun loadAnnotations(json: String) {
+        val pages = parseAnnotations(json)
+        drawingController.clearAllStrokes()
+        drawingController.clearAllTexts()
+
+        for ((pageIndex, page) in pages.withIndex()) {
+            val drawingStrokes = page.strokes.map { stroke ->
+                DrawingStroke(
+                    id = java.util.UUID.randomUUID().toString(),
+                    color = stroke.color,
+                    width = stroke.width,
+                    opacity = stroke.opacity,
+                    path = stroke.path.map { point ->
+                        android.graphics.PointF(point.getOrElse(0) { 0f }, point.getOrElse(1) { 0f })
+                    }.toMutableList()
+                )
+            }
+            drawingController.setStrokes(drawingStrokes, pageIndex)
+
+            for (text in page.text) {
+                if (text.point.size < 2) continue
+                val drawingText = DrawingText(
+                    id = java.util.UUID.randomUUID().toString(),
+                    color = text.color,
+                    fontSize = text.fontSize,
+                    point = text.point,
+                    str = text.str
+                )
+                drawingController.addText(drawingText, pageIndex)
+            }
+        }
+        drawingController.clearUndoStack()
+        redrawOverlay()
     }
 
     // MARK: - PDF Loading

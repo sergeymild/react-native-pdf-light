@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   StyleSheet,
   View,
@@ -7,7 +13,6 @@ import {
   SafeAreaView,
   Alert,
   ScrollView,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import {
@@ -53,8 +58,8 @@ export function DrawingScreen({ onBack }: Props) {
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('view');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [annotations, setAnnotations] = useState<AnnotationPage[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const loadedAnnotationsRef = useRef<AnnotationPage[] | null>(null);
 
   // Load annotations from backend on mount
   useEffect(() => {
@@ -67,36 +72,24 @@ export function DrawingScreen({ onBack }: Props) {
           console.log('[DrawingScreen] Fetch timed out after 3s');
           controller.abort();
         }, 3000);
-        console.log('[DrawingScreen] Starting fetch...');
         const res = await fetch(url, { signal: controller.signal });
         clearTimeout(timeout);
-        console.log('[DrawingScreen] Fetch response status:', res.status);
         const data = await res.json();
-        console.log('[DrawingScreen] Response data:', JSON.stringify(data));
         if (data.annotations) {
-          console.log('[DrawingScreen] Loaded', data.annotations.length, 'pages from server');
-          for (let i = 0; i < data.annotations.length; i++) {
-            const page = data.annotations[i];
-            for (let s = 0; s < (page.strokes || []).length; s++) {
-              const stroke = page.strokes[s];
-              console.log(`[COORDS][LOAD] page=${i} stroke=${s} color=${stroke.color} width=${stroke.width} opacity=${stroke.opacity} points=${stroke.path.length} first=${JSON.stringify(stroke.path[0])} last=${JSON.stringify(stroke.path[stroke.path.length - 1])}`);
-            }
-            for (let t = 0; t < (page.text || []).length; t++) {
-              const txt = page.text[t];
-              console.log(`[COORDS][LOAD] page=${i} text=${t} point=${JSON.stringify(txt.point)} fontSize=${txt.fontSize} str="${txt.str}"`);
-            }
-          }
-          setAnnotations(data.annotations);
+          console.log(
+            '[DrawingScreen] Loaded',
+            data.annotations.length,
+            'pages from server'
+          );
+          loadedAnnotationsRef.current = data.annotations;
         } else {
           console.log('[DrawingScreen] No saved annotations on server');
-          setAnnotations([]);
+          loadedAnnotationsRef.current = [];
         }
       } catch (e: any) {
         console.warn('[DrawingScreen] Fetch error:', e.message || e);
-        console.warn('[DrawingScreen] Error name:', e.name);
-        setAnnotations([]);
+        loadedAnnotationsRef.current = [];
       } finally {
-        console.log('[DrawingScreen] Loading complete');
         setLoading(false);
       }
     })();
@@ -113,6 +106,14 @@ export function DrawingScreen({ onBack }: Props) {
     (event: { width: number; height: number; pageCount: number }) => {
       console.log('Drawing PDF loaded:', event);
       pageIndicatorRef.current?.setPageCount(event.pageCount);
+      // Load saved annotations as editable strokes
+      if (
+        loadedAnnotationsRef.current &&
+        loadedAnnotationsRef.current.length > 0
+      ) {
+        console.log('[DrawingScreen] Loading annotations as editable strokes');
+        pdfViewRef.current?.loadAnnotations(loadedAnnotationsRef.current);
+      }
     },
     []
   );
@@ -129,83 +130,46 @@ export function DrawingScreen({ onBack }: Props) {
 
   const handleSave = useCallback(async () => {
     console.log('[DrawingScreen] handleSave called');
-    console.log('[DrawingScreen] current annotations state:', annotations?.length, 'pages');
     const result = await pdfViewRef.current?.getAnnotations();
-    console.log('[DrawingScreen] getAnnotations result:', result ? 'exists' : 'null');
-    console.log('[DrawingScreen] getAnnotations keys:', result ? Object.keys(result) : 'none');
     if (result) {
-      const userPages = Object.values(result);
-      console.log('[DrawingScreen] userPages count:', userPages.length);
-      // Log raw getAnnotations data
-      for (let i = 0; i < userPages.length; i++) {
-        for (let s = 0; s < (userPages[i]?.strokes || []).length; s++) {
-          const stroke = userPages[i]!.strokes[s]!;
-          console.log(`[COORDS][SAVE_RAW] page=${i} stroke=${s} color=${stroke.color} width=${stroke.width} opacity=${stroke.opacity} points=${stroke.path.length} first=${JSON.stringify(stroke.path[0])} last=${JSON.stringify(stroke.path[stroke.path.length - 1])}`);
-        }
-        for (let t = 0; t < (userPages[i]?.text || []).length; t++) {
-          const txt = userPages[i]!.text[t]!;
-          console.log(`[COORDS][SAVE_RAW] page=${i} text=${t} point=${JSON.stringify(txt.point)} fontSize=${txt.fontSize} str="${txt.str}"`);
-        }
-      }
+      // getAnnotations returns all editable strokes/texts (loaded + user-drawn)
+      const pages = Object.values(result);
 
-      // Log existing annotations state
-      for (let i = 0; i < (annotations?.length || 0); i++) {
-        const page = annotations![i]!;
-        for (let s = 0; s < (page.strokes || []).length; s++) {
-          const stroke = page.strokes[s]!;
-          console.log(`[COORDS][SAVE_EXISTING] page=${i} stroke=${s} color=${stroke.color} width=${stroke.width} opacity=${stroke.opacity} points=${stroke.path.length} first=${JSON.stringify(stroke.path[0])} last=${JSON.stringify(stroke.path[stroke.path.length - 1])}`);
-        }
-        for (let t = 0; t < (page.text || []).length; t++) {
-          const txt = page.text[t]!;
-          console.log(`[COORDS][SAVE_EXISTING] page=${i} text=${t} point=${JSON.stringify(txt.point)} fontSize=${txt.fontSize} str="${txt.str}"`);
-        }
-      }
+      const strokeCount = pages.reduce(
+        (sum, page) => sum + (page?.strokes?.length || 0),
+        0
+      );
+      const textCount = pages.reduce(
+        (sum, page) => sum + (page?.text?.length || 0),
+        0
+      );
+      console.log(
+        '[DrawingScreen] Saving:',
+        strokeCount,
+        'strokes,',
+        textCount,
+        'texts across',
+        pages.length,
+        'pages'
+      );
 
-      // Merge: static (loaded from server) + new user drawings
-      const maxLen = Math.max(userPages.length, annotations?.length || 0);
-      const merged: AnnotationPage[] = [];
-      for (let i = 0; i < maxLen; i++) {
-        const existing = annotations?.[i];
-        const drawn = userPages[i];
-        merged.push({
-          strokes: [
-            ...(existing?.strokes || []),
-            ...(drawn?.strokes || []),
-          ],
-          text: [
-            ...(existing?.text || []),
-            ...(drawn?.text || []),
-          ],
+      // Convert keyed object to array (fill gaps with empty pages)
+      const pageKeys = Object.keys(result).map(Number);
+      const maxPage = pageKeys.length > 0 ? Math.max(...pageKeys) : -1;
+      const annotationsArray: AnnotationPage[] = [];
+      for (let i = 0; i <= maxPage; i++) {
+        const page = result[String(i)];
+        annotationsArray.push({
+          strokes: page?.strokes || [],
+          text: page?.text || [],
         });
       }
-
-      // Log merged result
-      for (let i = 0; i < merged.length; i++) {
-        for (let s = 0; s < merged[i]!.strokes.length; s++) {
-          const stroke = merged[i]!.strokes[s]!;
-          console.log(`[COORDS][SAVE_MERGED] page=${i} stroke=${s} color=${stroke.color} width=${stroke.width} opacity=${stroke.opacity} points=${stroke.path.length} first=${JSON.stringify(stroke.path[0])} last=${JSON.stringify(stroke.path[stroke.path.length - 1])}`);
-        }
-        for (let t = 0; t < merged[i]!.text.length; t++) {
-          const txt = merged[i]!.text[t]!;
-          console.log(`[COORDS][SAVE_MERGED] page=${i} text=${t} point=${JSON.stringify(txt.point)} fontSize=${txt.fontSize} str="${txt.str}"`);
-        }
-      }
-
-      const strokeCount = merged.reduce(
-        (sum, page) => sum + page.strokes.length,
-        0
-      );
-      const textCount = merged.reduce(
-        (sum, page) => sum + page.text.length,
-        0
-      );
-      console.log('[DrawingScreen] Merged:', strokeCount, 'strokes,', textCount, 'texts across', merged.length, 'pages');
 
       try {
         const res = await fetch(`${API_BASE}/annotations?docId=${DOC_ID}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ annotations: merged }),
+          body: JSON.stringify({ annotations: annotationsArray }),
         });
         const data = await res.json();
         console.log('[DrawingScreen] Server response:', data);
@@ -217,10 +181,8 @@ export function DrawingScreen({ onBack }: Props) {
         console.warn('[DrawingScreen] Save error:', e.message || e);
         Alert.alert('Error', 'Failed to save annotations to server');
       }
-    } else {
-      console.log('[DrawingScreen] getAnnotations returned null/undefined');
     }
-  }, [annotations]);
+  }, []);
 
   if (!source || loading) {
     return (
@@ -293,7 +255,6 @@ export function DrawingScreen({ onBack }: Props) {
         maxZoom={2}
         backgroundColor="#ffffff"
         edgeTapZone={30}
-        annotations={annotations}
         drawingMode={drawingMode}
         drawingTool={drawingTool}
         textTool={DEFAULT_TEXT_TOOL}

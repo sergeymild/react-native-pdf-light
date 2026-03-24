@@ -36,6 +36,10 @@ class ZoomablePdfScrollViewManager: RCTViewManager {
         withPdfView(node, rejecter: rejecter) { resolver($0.getAnnotations()) }
     }
 
+    @objc func loadAnnotations(_ node: NSNumber, annotations: String) {
+        withPdfView(node) { $0.loadAnnotations(annotations) }
+    }
+
     private func withPdfView(_ node: NSNumber, rejecter: RCTPromiseRejectBlock? = nil, action: @escaping (ZoomablePdfScrollView) -> Void) {
         guard let uiManager = bridge.uiManager else {
             rejecter?("ERROR", "UIManager not available", nil)

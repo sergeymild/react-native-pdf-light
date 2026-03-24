@@ -53,6 +53,12 @@ export type PdfViewerRef = {
   getAnnotations: () => Promise<
     Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
   >;
+  /**
+   * Load annotations as editable user strokes/texts into the DrawingController.
+   * Unlike the `annotations` prop which bakes them into the bitmap,
+   * these are live on the overlay and can be edited, erased, and exported.
+   */
+  loadAnnotations: (annotations: AnnotationPage[]) => void;
   /** Undo the last drawing action. */
   undo: () => void;
   /** Redo the last undone action. */

@@ -65,6 +65,7 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
             "clearStrokes" -> view.clearStrokes(args?.getInt(0) ?: -1)
             "undo" -> view.undo()
             "redo" -> view.redo()
+            "loadAnnotations" -> view.loadAnnotations(args?.getString(0) ?: "")
         }
     }
 }

@@ -304,6 +304,16 @@ export const NativeZoomablePdfScrollView = forwardRef<
       }
       return {};
     },
+    loadAnnotations: (annotations) => {
+      if (viewRef.current) {
+        const handle = findNodeHandle(viewRef.current);
+        if (handle) {
+          UIManager.dispatchViewManagerCommand(handle, 'loadAnnotations', [
+            JSON.stringify(annotations),
+          ]);
+        }
+      }
+    },
     undo: () => {
       if (viewRef.current) {
         const handle = findNodeHandle(viewRef.current);

@@ -59,6 +59,7 @@ class PagingPdfViewManager(private val pdfMutex: Lock) : SimpleViewManager<Pagin
             "clearStrokes" -> view.clearStrokes(args?.getInt(0) ?: -1)
             "undo" -> view.undo()
             "redo" -> view.redo()
+            "loadAnnotations" -> view.loadAnnotations(args?.getString(0) ?: "")
         }
     }
 }

@@ -298,6 +298,7 @@ class DrawingController {
         let strokes = pageStrokes.getStrokes(forPage: page)
 
         for stroke in strokes.reversed() {
+            // Check distance to points
             for pathPoint in stroke.path {
                 guard pathPoint.count >= 2 else { continue }
                 let strokePoint = CGPoint(x: pathPoint[0], y: pathPoint[1])
@@ -309,6 +310,24 @@ class DrawingController {
                         delegate?.drawingControllerNeedsRedraw(self)
                     }
                     return
+                }
+            }
+
+            // Check distance to line segments between consecutive points
+            if stroke.path.count >= 2 {
+                for i in 0..<(stroke.path.count - 1) {
+                    guard stroke.path[i].count >= 2, stroke.path[i + 1].count >= 2 else { continue }
+                    let a = CGPoint(x: stroke.path[i][0], y: stroke.path[i][1])
+                    let b = CGPoint(x: stroke.path[i + 1][0], y: stroke.path[i + 1][1])
+                    let dist = distanceToSegment(point: point, segStart: a, segEnd: b)
+                    if dist < threshold {
+                        if pageStrokes.removeStroke(withId: stroke.id, fromPage: page) {
+                            pushUndoAction(.removeStroke(page: page, stroke: stroke))
+                            delegate?.drawingController(self, didRemoveStroke: stroke.id, onPage: page)
+                            delegate?.drawingControllerNeedsRedraw(self)
+                        }
+                        return
+                    }
                 }
             }
         }
@@ -688,6 +707,21 @@ class DrawingController {
     }
 
     // MARK: - Helpers
+
+    /// Distance from point to line segment (clamped to segment, not infinite line)
+    private func distanceToSegment(point: CGPoint, segStart: CGPoint, segEnd: CGPoint) -> CGFloat {
+        let dx = segEnd.x - segStart.x
+        let dy = segEnd.y - segStart.y
+        let lengthSquared = dx * dx + dy * dy
+        if lengthSquared == 0 {
+            return hypot(point.x - segStart.x, point.y - segStart.y)
+        }
+        // Project point onto segment, clamped to [0,1]
+        let t = max(0, min(1, ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared))
+        let projX = segStart.x + t * dx
+        let projY = segStart.y + t * dy
+        return hypot(point.x - projX, point.y - projY)
+    }
 
     private func parseColor(_ hex: String) -> UIColor {
         return UIColor(hexString: hex) ?? .black

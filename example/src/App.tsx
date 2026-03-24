@@ -4,15 +4,16 @@ import {
   PagingPdfScreen,
   ZoomablePdfScreen,
   DrawingScreen,
+  AnnotationsPreviewScreen,
 } from './screens';
 
-type Screen = 'home' | 'paging' | 'zoomable' | 'drawing';
+type Screen = 'home' | 'paging' | 'zoomable' | 'drawing' | 'preview';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
 
   const handleNavigate = useCallback(
-    (screen: 'paging' | 'zoomable' | 'drawing') => {
+    (screen: 'paging' | 'zoomable' | 'drawing' | 'preview') => {
       setCurrentScreen(screen);
     },
     []
@@ -29,6 +30,8 @@ export default function App() {
       return <ZoomablePdfScreen onBack={handleBack} />;
     case 'drawing':
       return <DrawingScreen onBack={handleBack} />;
+    case 'preview':
+      return <AnnotationsPreviewScreen onBack={handleBack} />;
     default:
       return <HomeScreen onNavigate={handleNavigate} />;
   }

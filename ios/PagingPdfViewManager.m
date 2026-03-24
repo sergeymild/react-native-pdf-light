@@ -42,5 +42,6 @@ RCT_EXTERN_METHOD(clearStrokes:(nonnull NSNumber *)node page:(int)page)
 RCT_EXTERN_METHOD(getAnnotations:(nonnull NSNumber *)node
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(loadAnnotations:(nonnull NSNumber *)node annotations:(NSString *)annotations)
 
 @end
