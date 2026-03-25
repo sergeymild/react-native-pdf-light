@@ -628,6 +628,7 @@ fun parseAnnotations(json: String?): List<AnnotationPage> {
                 strokes.add(Stroke(
                     color = strokeObj.getString("color"),
                     width = strokeObj.getDouble("width").toFloat(),
+                    opacity = if (strokeObj.has("opacity")) strokeObj.getDouble("opacity").toFloat() else 1f,
                     path = path
                 ))
             }

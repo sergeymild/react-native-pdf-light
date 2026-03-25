@@ -277,7 +277,9 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
     }
 
     fun loadAnnotations(json: String) {
+        android.util.Log.d("PdfViewer", "[loadAnnotations] json length=${json.length}")
         val pages = parseAnnotations(json)
+        android.util.Log.d("PdfViewer", "[loadAnnotations] parsed ${pages.size} pages")
         drawingController.clearAllStrokes()
         drawingController.clearAllTexts()
 
@@ -308,6 +310,7 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
             }
         }
         drawingController.clearUndoStack()
+        android.util.Log.d("PdfViewer", "[loadAnnotations] done, calling redrawOverlay")
         redrawOverlay()
     }
 

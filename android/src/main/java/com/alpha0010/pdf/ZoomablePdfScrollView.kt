@@ -242,8 +242,7 @@ class ZoomablePdfScrollView(context: Context, pdfMutex: Lock) : PdfViewerBase(co
     }
 
     override fun redrawOverlay() {
-        mDrawingOverlay.scrollOffset = mRecyclerView.computeVerticalScrollOffset().toFloat()
-        mDrawingOverlay.invalidate()
+        updateDrawingOverlay()
     }
 
     override fun setMinZoom(minZoom: Float) {
