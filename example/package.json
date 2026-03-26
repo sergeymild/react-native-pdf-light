@@ -13,7 +13,11 @@
     "react": "18.3.1",
     "react-native": "0.76.9",
     "react-native-file-access": "^3.2.0",
-    "react-native-pager-view": "^6.9.1"
+    "react-native-gesture-handler": "^2.30.0",
+    "react-native-pager-view": "^6.9.1",
+    "react-native-reanimated": "3.16.7",
+    "react-native-svg": "^15.15.4",
+    "reanimated-color-picker": "^4.2.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

@@ -11,9 +11,8 @@ import {
   Text,
   TouchableOpacity,
   SafeAreaView,
-  Alert,
-  ScrollView,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import {
   PdfViewer,
@@ -25,29 +24,42 @@ import {
   DEFAULT_TEXT_TOOL,
   type AnnotationPage,
 } from 'react-native-pdf-light';
+import ColorPicker, {
+  HueSlider,
+  Panel1,
+  Swatches,
+} from 'reanimated-color-picker';
 import { useAsset } from '../assets.utils';
 import { PageIndicator, type PageIndicatorRef } from '../PageIndicator';
+import {
+  IcClose,
+  IcUndo,
+  IcRedo,
+  IcDraw,
+  IcHighlight,
+  IcText,
+  IcErase,
+} from '../icons';
 
-// Use your computer's local network IP for real devices
 const API_BASE = 'http://192.168.1.124:3001';
 const DOC_ID = 'caldara';
+
+const TOOLBAR_COLOR = '#2D2B55';
 
 type Props = {
   onBack: () => void;
 };
 
-type ModeButton = {
+type ToolButton = {
   mode: DrawingMode;
-  label: string;
-  color: string;
+  Icon: React.FC<{ size?: number; color?: string }>;
 };
 
-const MODES: ModeButton[] = [
-  { mode: 'view', label: 'View', color: '#4CAF50' },
-  { mode: 'draw', label: 'Draw', color: '#2196F3' },
-  { mode: 'highlight', label: 'Highlight', color: '#FFC107' },
-  { mode: 'erase', label: 'Erase', color: '#f44336' },
-  { mode: 'text', label: 'Text', color: '#9C27B0' },
+const TOOLS: ToolButton[] = [
+  { mode: 'draw', Icon: IcDraw },
+  { mode: 'highlight', Icon: IcHighlight },
+  { mode: 'text', Icon: IcText },
+  { mode: 'erase', Icon: IcErase },
 ];
 
 export function DrawingScreen({ onBack }: Props) {
@@ -59,35 +71,27 @@ export function DrawingScreen({ onBack }: Props) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedColor, setSelectedColor] = useState(
+    DEFAULT_DRAWING_TOOL.color
+  );
+  const [colorPickerVisible, setColorPickerVisible] = useState(false);
   const loadedAnnotationsRef = useRef<AnnotationPage[] | null>(null);
 
-  // Load annotations from backend on mount
   useEffect(() => {
     const url = `${API_BASE}/annotations?docId=${DOC_ID}`;
-    console.log('[DrawingScreen] Fetching annotations from:', url);
     (async () => {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => {
-          console.log('[DrawingScreen] Fetch timed out after 3s');
-          controller.abort();
-        }, 3000);
+        const timeout = setTimeout(() => controller.abort(), 3000);
         const res = await fetch(url, { signal: controller.signal });
         clearTimeout(timeout);
         const data = await res.json();
         if (data.annotations) {
-          console.log(
-            '[DrawingScreen] Loaded',
-            data.annotations.length,
-            'pages from server'
-          );
           loadedAnnotationsRef.current = data.annotations;
         } else {
-          console.log('[DrawingScreen] No saved annotations on server');
           loadedAnnotationsRef.current = [];
         }
-      } catch (e: any) {
-        console.warn('[DrawingScreen] Fetch error:', e.message || e);
+      } catch {
         loadedAnnotationsRef.current = [];
       } finally {
         setLoading(false);
@@ -97,21 +101,18 @@ export function DrawingScreen({ onBack }: Props) {
 
   const drawingTool: DrawingTool = useMemo(() => {
     if (drawingMode === 'highlight') {
-      return DEFAULT_HIGHLIGHTER_TOOL;
+      return { ...DEFAULT_HIGHLIGHTER_TOOL, color: selectedColor };
     }
-    return DEFAULT_DRAWING_TOOL;
-  }, [drawingMode]);
+    return { ...DEFAULT_DRAWING_TOOL, color: selectedColor };
+  }, [drawingMode, selectedColor]);
 
   const handleLoadComplete = useCallback(
     (event: { width: number; height: number; pageCount: number }) => {
-      console.log('Drawing PDF loaded:', event);
       pageIndicatorRef.current?.setPageCount(event.pageCount);
-      // Load saved annotations as editable strokes
       if (
         loadedAnnotationsRef.current &&
         loadedAnnotationsRef.current.length > 0
       ) {
-        console.log('[DrawingScreen] Loading annotations as editable strokes');
         pdfViewRef.current?.loadAnnotations(loadedAnnotationsRef.current);
       }
     },
@@ -122,38 +123,14 @@ export function DrawingScreen({ onBack }: Props) {
     pageIndicatorRef.current?.setPage(page);
   }, []);
 
-  const handleZoomChange = useCallback((scale: number) => {}, []);
-
-  const handleClearAll = useCallback(() => {
-    pdfViewRef.current?.clearStrokes(-1);
+  const handleToolPress = useCallback((mode: DrawingMode) => {
+    setDrawingMode((prev) => (prev === mode ? 'view' : mode));
   }, []);
 
   const handleSave = useCallback(async () => {
-    console.log('[DrawingScreen] handleSave called');
     const result = await pdfViewRef.current?.getAnnotations();
     if (result) {
-      // getAnnotations returns all editable strokes/texts (loaded + user-drawn)
       const pages = Object.values(result);
-
-      const strokeCount = pages.reduce(
-        (sum, page) => sum + (page?.strokes?.length || 0),
-        0
-      );
-      const textCount = pages.reduce(
-        (sum, page) => sum + (page?.text?.length || 0),
-        0
-      );
-      console.log(
-        '[DrawingScreen] Saving:',
-        strokeCount,
-        'strokes,',
-        textCount,
-        'texts across',
-        pages.length,
-        'pages'
-      );
-
-      // Convert keyed object to array (fill gaps with empty pages)
       const pageKeys = Object.keys(result).map(Number);
       const maxPage = pageKeys.length > 0 ? Math.max(...pageKeys) : -1;
       const annotationsArray: AnnotationPage[] = [];
@@ -164,24 +141,20 @@ export function DrawingScreen({ onBack }: Props) {
           text: page?.text || [],
         });
       }
-
       try {
-        const res = await fetch(`${API_BASE}/annotations?docId=${DOC_ID}`, {
+        await fetch(`${API_BASE}/annotations?docId=${DOC_ID}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ annotations: annotationsArray }),
         });
-        const data = await res.json();
-        console.log('[DrawingScreen] Server response:', data);
-        Alert.alert(
-          'Saved to server',
-          `Strokes: ${strokeCount}, Texts: ${textCount}`
-        );
       } catch (e: any) {
         console.warn('[DrawingScreen] Save error:', e.message || e);
-        Alert.alert('Error', 'Failed to save annotations to server');
       }
     }
+  }, []);
+
+  const onColorSelect = useCallback((color: { hex: string }) => {
+    setSelectedColor(color.hex);
   }, []);
 
   if (!source || loading) {
@@ -193,60 +166,7 @@ export function DrawingScreen({ onBack }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Drawing Mode</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <View style={styles.toolbar}>
-        <ScrollView horizontal>
-          {MODES.map((btn) => (
-            <TouchableOpacity
-              key={btn.mode}
-              style={[
-                styles.modeButton,
-                { backgroundColor: btn.color },
-                drawingMode === btn.mode && styles.modeButtonActive,
-              ]}
-              onPress={() => setDrawingMode(btn.mode)}
-            >
-              <Text
-                style={[
-                  styles.modeButtonText,
-                  drawingMode === btn.mode && styles.modeButtonTextActive,
-                ]}
-              >
-                {btn.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            style={[styles.undoButton, !canUndo && styles.buttonDisabled]}
-            onPress={() => pdfViewRef.current?.undo()}
-            disabled={!canUndo}
-          >
-            <Text style={styles.undoButtonText}>Undo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.undoButton, !canRedo && styles.buttonDisabled]}
-            onPress={() => pdfViewRef.current?.redo()}
-            disabled={!canRedo}
-          >
-            <Text style={styles.undoButtonText}>Redo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.clearButton} onPress={handleClearAll}>
-            <Text style={styles.clearButtonText}>Clear</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Save</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-
+    <View style={styles.container}>
       <PdfViewer
         viewerType="zoomable"
         ref={pdfViewRef}
@@ -258,25 +178,138 @@ export function DrawingScreen({ onBack }: Props) {
         drawingMode={drawingMode}
         drawingTool={drawingTool}
         textTool={DEFAULT_TEXT_TOOL}
-        onDrawingStart={() => console.log('Drawing started')}
-        onDrawingEnd={() => console.log('Drawing ended')}
+        onDrawingStart={() => {}}
+        onDrawingEnd={() => {}}
         onUndoStateChange={(state) => {
           setCanUndo(state.canUndo);
           setCanRedo(state.canRedo);
         }}
         onLoadComplete={handleLoadComplete}
         onPageChange={handlePageChange}
-        onZoomChange={handleZoomChange}
+        onZoomChange={() => {}}
         onError={(e) => console.warn('PDF Error:', e.message)}
         style={styles.pdfView}
       />
+
+      {/* Close button - top left */}
+      <SafeAreaView style={styles.topLeftContainer}>
+        <TouchableOpacity style={styles.floatingButton} onPress={onBack}>
+          <IcClose size={20} />
+        </TouchableOpacity>
+      </SafeAreaView>
+
+      {/* Undo/Redo/Save - top right */}
+      <SafeAreaView style={styles.topRightContainer}>
+        <TouchableOpacity
+          style={[styles.floatingButton, !canUndo && styles.buttonDisabled]}
+          onPress={() => pdfViewRef.current?.undo()}
+          disabled={!canUndo}
+        >
+          <IcUndo size={20} color="white" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.floatingButton, !canRedo && styles.buttonDisabled]}
+          onPress={() => pdfViewRef.current?.redo()}
+          disabled={!canRedo}
+        >
+          <IcRedo size={20} color="white" />
+        </TouchableOpacity>
+      </SafeAreaView>
+
+      {/* Bottom toolbar */}
+      <SafeAreaView style={styles.bottomContainer}>
+        <View style={styles.toolbar}>
+          {TOOLS.map((tool) => {
+            const isActive = drawingMode === tool.mode;
+            return (
+              <TouchableOpacity
+                key={tool.mode}
+                style={[styles.toolButton, isActive && styles.toolButtonActive]}
+                onPress={() => handleToolPress(tool.mode)}
+              >
+                <tool.Icon
+                  size={24}
+                  color={isActive ? '#fff' : 'rgba(255,255,255,0.5)'}
+                />
+              </TouchableOpacity>
+            );
+          })}
+
+          {/* Color picker circle */}
+          <TouchableOpacity
+            style={styles.colorPickerButton}
+            onPress={() => setColorPickerVisible(true)}
+          >
+            <View style={styles.colorRing}>
+              <View
+                style={[
+                  styles.colorCircleInner,
+                  { backgroundColor: selectedColor },
+                ]}
+              />
+            </View>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
 
       <PageIndicator
         ref={pageIndicatorRef}
         initialPage={0}
         initialPageCount={0}
       />
-    </SafeAreaView>
+
+      {/* Color picker modal */}
+      <Modal
+        visible={colorPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setColorPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setColorPickerVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.modalContent}
+          >
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Pick a color</Text>
+            <ColorPicker
+              value={selectedColor}
+              onComplete={onColorSelect}
+              style={styles.colorPicker}
+            >
+              <Panel1 style={styles.colorPanel} />
+              <HueSlider style={styles.hueSlider} />
+              <Swatches
+                colors={[
+                  '#000000',
+                  '#FF0000',
+                  '#FF8800',
+                  '#FFFF00',
+                  '#00FF00',
+                  '#0088FF',
+                  '#0000FF',
+                  '#8800FF',
+                  '#FF00FF',
+                  '#FFFFFF',
+                ]}
+                style={styles.swatches}
+              />
+            </ColorPicker>
+            <TouchableOpacity
+              style={styles.doneButton}
+              onPress={() => setColorPickerVisible(false)}
+            >
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    </View>
   );
 }
 
@@ -285,93 +318,138 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#333',
   },
-  header: {
-    flexDirection: 'row',
+  pdfView: {
+    flex: 1,
+  },
+  topLeftContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 16,
+  },
+  topRightContainer: {
+    position: 'absolute',
+    top: 0,
+    right: 16,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FF9800',
+    gap: 10,
   },
-  backButton: {
-    padding: 8,
+  floatingButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: TOOLBAR_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  backText: {
-    color: '#fff',
-    fontSize: 16,
+  buttonDisabled: {
+    opacity: 0.4,
   },
-  title: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  placeholder: {
-    width: 50,
+  bottomContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingBottom: 8,
   },
   toolbar: {
     flexDirection: 'row',
-    paddingHorizontal: 10,
+    alignItems: 'center',
+    backgroundColor: TOOLBAR_COLOR,
+    borderRadius: 28,
+    paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#222',
     gap: 8,
   },
-  modeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    opacity: 0.6,
+  toolButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modeButtonActive: {
-    opacity: 1,
-    borderWidth: 2,
-    borderColor: '#fff',
+  toolButtonActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
-  modeButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
+  colorPickerButton: {
+    marginLeft: 4,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modeButtonTextActive: {
-    fontWeight: '700',
+  colorRing: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 3,
+    borderColor: '#FF4500',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Simulate rainbow ring with multiple colors via shadow (simplified)
+    shadowColor: '#FF00FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
   },
-  undoButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#607D8B',
+  colorCircleInner: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
-  undoButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  buttonDisabled: {
-    opacity: 0.3,
-  },
-  clearButton: {
-    marginLeft: 'auto',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#666',
-  },
-  clearButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  saveButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#4CAF50',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  pdfView: {
+  modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    paddingTop: 12,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#ccc',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  colorPicker: {
+    gap: 16,
+  },
+  colorPanel: {
+    height: 200,
+    borderRadius: 12,
+  },
+  hueSlider: {
+    height: 32,
+    borderRadius: 16,
+  },
+  swatches: {
+    justifyContent: 'center',
+    gap: 8,
+  },
+  doneButton: {
+    marginTop: 20,
+    backgroundColor: TOOLBAR_COLOR,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
