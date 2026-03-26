@@ -170,7 +170,7 @@ export function DrawingScreen({ onBack }: Props) {
   return (
     <View style={styles.container}>
       <PdfViewer
-        viewerType="zoomable"
+        viewerType="paging"
         ref={pdfViewRef}
         source={source}
         minZoom={1}
@@ -194,14 +194,14 @@ export function DrawingScreen({ onBack }: Props) {
       />
 
       {/* Close button - top left */}
-      <SafeAreaView style={styles.topLeftContainer}>
+      <SafeAreaView style={styles.topLeftContainer} pointerEvents="box-none">
         <TouchableOpacity style={styles.floatingButton} onPress={onBack}>
           <IcClose size={20} />
         </TouchableOpacity>
       </SafeAreaView>
 
       {/* Undo/Redo/Save - top right */}
-      <SafeAreaView style={styles.topRightContainer}>
+      <SafeAreaView style={styles.topRightContainer} pointerEvents="box-none">
         <TouchableOpacity
           style={[styles.floatingButton, !canUndo && styles.buttonDisabled]}
           onPress={() => pdfViewRef.current?.undo()}
@@ -219,7 +219,7 @@ export function DrawingScreen({ onBack }: Props) {
       </SafeAreaView>
 
       {/* Bottom toolbar */}
-      <SafeAreaView style={styles.bottomContainer}>
+      <SafeAreaView style={styles.bottomContainer} pointerEvents="box-none">
         <View style={styles.toolbar}>
           {TOOLS.map((tool) => {
             const isActive = drawingMode === tool.mode;

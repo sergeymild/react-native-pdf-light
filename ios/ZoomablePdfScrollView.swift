@@ -129,7 +129,9 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
 
     override func onDrawingModeChanged(_ mode: DrawingMode) {
         let isViewMode = mode == .view
-        scrollView.isScrollEnabled = isViewMode
+
+        // Disable scroll gestures instead of isScrollEnabled to avoid contentOffset reset
+        scrollView.panGestureRecognizer.isEnabled = isViewMode
         scrollView.pinchGestureRecognizer?.isEnabled = isViewMode
         doubleTapGesture.isEnabled = isViewMode
         drawingPinchGesture.isEnabled = !isViewMode
@@ -293,8 +295,10 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        NSLog("[SV] layoutSubviews bounds=\(bounds) sv.offset=\(scrollView.contentOffset) sv.zoom=\(scrollView.zoomScale) sv.enabled=\(scrollView.isScrollEnabled)")
 
         scrollView.frame = bounds
+        NSLog("[SV] after scrollView.frame=bounds: sv.offset=\(scrollView.contentOffset) sv.zoom=\(scrollView.zoomScale)")
 
         // Clear cache and reset zoom if width changed (rotation)
         if bounds.width != previousBoundsWidth && previousBoundsWidth > 0 {
@@ -312,9 +316,11 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
 
         // Don't update layout during zoom
         if scrollView.zoomScale != 1.0 {
+            NSLog("[SV] updateCollectionViewSize: zoom!=1 (\(scrollView.zoomScale)), only updating inset")
             updateContentInset()
             return
         }
+        NSLog("[SV] updateCollectionViewSize: full update, offset=\(scrollView.contentOffset)")
 
         let viewWidth = bounds.width
         let pageHeight = unscaledPageHeight
@@ -338,11 +344,16 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     }
 
     private func updateContentInset() {
+        let before = scrollView.contentOffset
         scrollView.contentInset = centeredContentInset(
             for: scrollView,
             extraTop: pdfPaddingTop,
             extraBottom: pdfPaddingBottom
         )
+        let after = scrollView.contentOffset
+        if before != after {
+            NSLog("[SV] updateContentInset moved offset \(before) -> \(after) inset=\(scrollView.contentInset)")
+        }
     }
 
     // MARK: - Page Detection
@@ -429,6 +440,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        NSLog("[SV] didZoom zoom=\(scrollView.zoomScale) offset=\(scrollView.contentOffset)")
         updateContentInset()
         drawingOverlay.zoomScale = scrollView.zoomScale
         drawingOverlay.setNeedsDisplay()
@@ -436,6 +448,7 @@ class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionVi
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        NSLog("[SV] didScroll offset=\(scrollView.contentOffset) zoom=\(scrollView.zoomScale) enabled=\(scrollView.isScrollEnabled) tracking=\(scrollView.isTracking) dragging=\(scrollView.isDragging)")
         updateCurrentPage()
     }
 
