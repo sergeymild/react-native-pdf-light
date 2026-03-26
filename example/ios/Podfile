@@ -1,4 +1,4 @@
-ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+ENV['RCT_NEW_ARCH_ENABLED'] = '1'
 # Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
@@ -32,5 +32,24 @@ target 'PdfViewerExample' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Fix fmt consteval error with Xcode 26 beta — patch source directly
+    fmt_base = File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      content = File.read(fmt_base)
+      # Replace `#elif defined(__cpp_consteval)\n#  define FMT_USE_CONSTEVAL 1`
+      # with `#elif defined(__cpp_consteval)\n#  define FMT_USE_CONSTEVAL 0`
+      if content.include?('#elif defined(__cpp_consteval)') && !content.include?('Xcode26_patched')
+        content = content.gsub(
+          "#elif defined(__cpp_consteval)\n#  define FMT_USE_CONSTEVAL 1",
+          "#elif defined(__cpp_consteval) /* Xcode26_patched */\n#  define FMT_USE_CONSTEVAL 0"
+        )
+        content = content.gsub(
+          "#elif FMT_GCC_VERSION >= 1002 || FMT_CLANG_VERSION >= 1101\n#  define FMT_USE_CONSTEVAL 1",
+          "#elif FMT_GCC_VERSION >= 1002 || FMT_CLANG_VERSION >= 1101\n#  define FMT_USE_CONSTEVAL 0"
+        )
+        File.write(fmt_base, content)
+      end
+    end
   end
 end

@@ -22,7 +22,11 @@
       "Bash(wc -l /Users/sergeigolishnikov/development/react-native-pdf-light/android/src/main/java/com/alpha0010/pdf/*.kt)",
       "Bash(cd:*)",
       "Bash(xcodebuild:*)",
-      "Bash(./gradlew assembleDebug)"
+      "Bash(./gradlew assembleDebug)",
+      "WebFetch(domain:react-native-community.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }
