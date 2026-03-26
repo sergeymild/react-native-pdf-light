@@ -260,10 +260,6 @@
 	[
 		{
 			"backtrace" : 4,
-			"id" : "react_codegen_RNFileAccessSpec::@f131f9d1a308a0661e6c"
-		},
-		{
-			"backtrace" : 4,
 			"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec"
 		},
 		{
@@ -273,6 +269,10 @@
 		{
 			"backtrace" : 4,
 			"id" : "react_codegen_rnreanimated::@8afabad14bfffa3f8b9a"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_RNFileAccessSpec::@f131f9d1a308a0661e6c"
 		},
 		{
 			"backtrace" : 4,

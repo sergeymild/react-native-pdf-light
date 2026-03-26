@@ -29,6 +29,7 @@ import ColorPicker, {
   Panel1,
   Swatches,
 } from 'reanimated-color-picker';
+import { runOnJS } from 'react-native-reanimated';
 import { useAsset } from '../assets.utils';
 import { PageIndicator, type PageIndicatorRef } from '../PageIndicator';
 import {
@@ -154,7 +155,8 @@ export function DrawingScreen({ onBack }: Props) {
   }, []);
 
   const onColorSelect = useCallback((color: { hex: string }) => {
-    setSelectedColor(color.hex);
+    'worklet';
+    runOnJS(setSelectedColor)(color.hex);
   }, []);
 
   if (!source || loading) {

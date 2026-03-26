@@ -10,10 +10,11 @@ import {
   NativeSyntheticEvent,
   NativeModules,
   processColor,
-  requireNativeComponent,
-  UIManager,
   ViewStyle,
 } from 'react-native';
+import RNZoomablePdfScrollViewNative, {
+  Commands as ZoomableCommands,
+} from './RNZoomablePdfScrollViewNativeComponent';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
 import type { AnnotationPage, PdfViewerRef } from './types';
@@ -213,10 +214,7 @@ export type NativeZoomablePdfScrollViewRef = PdfViewerRef;
 
 // --- Native component ---
 
-const RNZoomablePdfScrollView =
-  requireNativeComponent<NativeZoomablePdfScrollViewProps>(
-    'RNZoomablePdfScrollView'
-  );
+const RNZoomablePdfScrollView = RNZoomablePdfScrollViewNative;
 
 /**
  * Native scrollable PDF viewer with global zoom support.
@@ -267,29 +265,17 @@ export const NativeZoomablePdfScrollView = forwardRef<
   useImperativeHandle(ref, () => ({
     resetZoom: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'resetZoom', []);
-        }
+        ZoomableCommands.resetZoom(viewRef.current);
       }
     },
     scrollToPage: (page: number, animated = true) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'scrollToPage', [
-            page,
-            animated,
-          ]);
-        }
+        ZoomableCommands.scrollToPage(viewRef.current, page, animated);
       }
     },
     clearStrokes: (page = -1) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
-        }
+        ZoomableCommands.clearStrokes(viewRef.current, page);
       }
     },
     getAnnotations: async () => {
@@ -306,28 +292,17 @@ export const NativeZoomablePdfScrollView = forwardRef<
     },
     loadAnnotations: (annotations) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'loadAnnotations', [
-            JSON.stringify(annotations),
-          ]);
-        }
+        ZoomableCommands.loadAnnotations(viewRef.current, JSON.stringify(annotations));
       }
     },
     undo: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'undo', []);
-        }
+        ZoomableCommands.undo(viewRef.current);
       }
     },
     redo: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'redo', []);
-        }
+        ZoomableCommands.redo(viewRef.current);
       }
     },
   }));

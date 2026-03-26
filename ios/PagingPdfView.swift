@@ -2,6 +2,7 @@ import UIKit
 
 // MARK: - PagingPdfView (paged PDF viewer with per-page zoom using UIPageViewController)
 
+@objc(PagingPdfView) @objcMembers
 class PagingPdfView: PdfViewerBase {
 
     // MARK: - Private State

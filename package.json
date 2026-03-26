@@ -140,6 +140,20 @@
     "trailingComma": "es5",
     "useTabs": false
   },
+  "codegenConfig": {
+    "name": "react_native_pdf_light",
+    "type": "components",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.alpha0010.pdf"
+    },
+    "ios": {
+      "componentProvider": {
+        "RNZoomablePdfScrollView": "RNZoomablePdfScrollViewComponentView",
+        "RNPagingPdfView": "RNPagingPdfViewComponentView"
+      }
+    }
+  },
   "react-native-builder-bob": {
     "source": "src",
     "output": "lib",

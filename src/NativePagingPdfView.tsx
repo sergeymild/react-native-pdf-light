@@ -10,10 +10,11 @@ import {
   NativeSyntheticEvent,
   NativeModules,
   processColor,
-  requireNativeComponent,
-  UIManager,
   ViewStyle,
 } from 'react-native';
+import RNPagingPdfViewNative, {
+  Commands as PagingCommands,
+} from './RNPagingPdfViewNativeComponent';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
 import type { AnnotationPage, PdfViewerRef } from './types';
@@ -193,8 +194,7 @@ export type NativePagingPdfViewRef = PdfViewerRef;
 
 // --- Native component ---
 
-const RNPagingPdfView =
-  requireNativeComponent<NativePagingPdfViewProps>('RNPagingPdfView');
+const RNPagingPdfView = RNPagingPdfViewNative;
 
 /**
  * Native paged PDF viewer with per-page zoom support.
@@ -243,29 +243,17 @@ export const NativePagingPdfView = forwardRef<
   useImperativeHandle(ref, () => ({
     resetZoom: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'resetZoom', []);
-        }
+        PagingCommands.resetZoom(viewRef.current);
       }
     },
     scrollToPage: (page: number, animated = true) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'scrollToPage', [
-            page,
-            animated,
-          ]);
-        }
+        PagingCommands.scrollToPage(viewRef.current, page, animated);
       }
     },
     clearStrokes: (page = -1) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
-        }
+        PagingCommands.clearStrokes(viewRef.current, page);
       }
     },
     getAnnotations: async () => {
@@ -282,28 +270,17 @@ export const NativePagingPdfView = forwardRef<
     },
     loadAnnotations: (annotations) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'loadAnnotations', [
-            JSON.stringify(annotations),
-          ]);
-        }
+        PagingCommands.loadAnnotations(viewRef.current, JSON.stringify(annotations));
       }
     },
     undo: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'undo', []);
-        }
+        PagingCommands.undo(viewRef.current);
       }
     },
     redo: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'redo', []);
-        }
+        PagingCommands.redo(viewRef.current);
       }
     },
   }));

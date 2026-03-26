@@ -40,6 +40,7 @@ func centeredContentInset(for scrollView: UIScrollView, extraTop: CGFloat = 0, e
 
 /// Base class for PagingPdfView and ZoomablePdfScrollView.
 /// Contains shared React props, PDF loading, annotation parsing, drawing controller, and stroke management.
+@objc(PdfViewerBase) @objcMembers
 class PdfViewerBase: UIView, DrawingControllerDelegate {
 
     // MARK: - React Props

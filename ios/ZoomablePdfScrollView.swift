@@ -2,6 +2,7 @@ import UIKit
 
 // MARK: - ZoomablePdfScrollView (scrollable PDF viewer with global zoom using UICollectionView)
 
+@objc(ZoomablePdfScrollView) @objcMembers
 class ZoomablePdfScrollView: PdfViewerBase, UIScrollViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate, TextAnnotationHandlerDelegate {
 
     // MARK: - Additional Props (Zoomable-only)
