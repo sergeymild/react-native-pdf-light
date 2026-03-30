@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
-import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -345,8 +344,13 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         }
 
         imageView = ImageView(context).apply {
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-            scaleType = ImageView.ScaleType.FIT_START
+            layoutParams = FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
         }
 
@@ -485,13 +489,60 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun updateScrollViewPadding() {
+        // Padding must be enough to scroll all zoomed content.
+        // Needed: (content + padding) - viewport >= content - viewport/scale
+        // → padding >= viewport * (1 - 1/scale)
         val zoomExtraPadding = if (isZoomed && height > 0) {
-            (height * (scale - 1) * 0.25f).toInt()
+            (height * (1f - 1f / scale)).toInt()
         } else 0
 
         if (scrollView.paddingBottom != zoomExtraPadding) {
             scrollView.setPadding(0, 0, 0, zoomExtraPadding)
             scrollView.clipToPadding = false
+        }
+    }
+
+    // Saved zoom state before keyboard shows
+    private var preKeyboardScrollY: Int? = null
+    private var preKeyboardScale: Float? = null
+    private var preKeyboardOffsetX: Float? = null
+    private var isKeyboardVisible = false
+
+    /** Call before showing keyboard to save zoom state */
+    fun saveZoomStateForKeyboard() {
+        if (isZoomed) {
+            preKeyboardScrollY = scrollView.scrollY
+            preKeyboardScale = scale
+            preKeyboardOffsetX = offsetX
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (oldw == w && oldh > 0 && h < oldh) {
+            isKeyboardVisible = true
+        } else if (oldw == w && oldh > 0 && h > oldh && isKeyboardVisible) {
+            isKeyboardVisible = false
+        }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (!isKeyboardVisible && preKeyboardScrollY != null) {
+            val ss = preKeyboardScrollY!!
+            val sc = preKeyboardScale ?: scale
+            val ox = preKeyboardOffsetX ?: offsetX
+            preKeyboardScrollY = null
+            preKeyboardScale = null
+            preKeyboardOffsetX = null
+            scale = sc
+            offsetX = ox
+            applyTransform()
+            updateScrollViewPadding()
+            // Must post to run AFTER NestedScrollView finishes its own layout
+            scrollView.post {
+                scrollView.scrollTo(0, ss)
+            }
         }
     }
 
@@ -501,10 +552,53 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         return isZoomed || ev.pointerCount > 1
     }
 
+    private var drawingCancelledByMultiTouch = false
+    private var lastMultiTouchY = 0f
+
+    private fun averageTouchY(event: MotionEvent): Float {
+        var sum = 0f
+        for (i in 0 until event.pointerCount) {
+            sum += event.getY(i)
+        }
+        return sum / event.pointerCount
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val controller = drawingController
 
         if (controller != null && controller.drawingMode != DrawingMode.VIEW) {
+            // Two+ fingers: cancel drawing, handle zoom/pan instead
+            if (event.pointerCount > 1) {
+                if (!drawingCancelledByMultiTouch) {
+                    if (controller.isDrawing) {
+                        controller.handleTouchCancelled()
+                    }
+                    textAnnotationHandler?.handleMultiTouchDetected()
+                    drawingCancelledByMultiTouch = true
+                    lastMultiTouchY = averageTouchY(event)
+                }
+                scaleDetector.onTouchEvent(event)
+
+                // Manual 2-finger scroll
+                val avgY = averageTouchY(event)
+                val deltaY = lastMultiTouchY - avgY
+                if (kotlin.math.abs(deltaY) > 0.5f) {
+                    scrollView.scrollBy(0, deltaY.toInt())
+                    lastMultiTouchY = avgY
+                }
+                return true
+            }
+
+            // After multi-touch ends, keep forwarding scale events until all up
+            if (drawingCancelledByMultiTouch) {
+                scaleDetector.onTouchEvent(event)
+                if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                    drawingCancelledByMultiTouch = false
+                }
+                return true
+            }
+
+            // Single finger: draw
             handleDrawingTouch(event, controller)
             return true
         }
@@ -556,11 +650,13 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
             setupTextHandler()
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    saveZoomStateForKeyboard()
                     parent?.requestDisallowInterceptTouchEvent(true)
                     textAnnotationHandler?.handleTouchDown(event)
                 }
                 MotionEvent.ACTION_MOVE -> textAnnotationHandler?.handleTouchMove(event)
                 MotionEvent.ACTION_UP -> {
+                    saveZoomStateForKeyboard()
                     parent?.requestDisallowInterceptTouchEvent(false)
                     textAnnotationHandler?.handleTouchUp(event)
                 }
@@ -676,6 +772,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         drawingOverlay.zoomScale = scale
 
         drawingOverlay.post {
+            // After layout, imageView.top reflects centering offset from gravity
+            val topOffset = imageView.top.toFloat()
+            if (topOffset > 0f) {
+                drawingOverlay.contentRect = RectF(0f, topOffset, viewWidth, topOffset + viewHeight)
+            }
             drawingOverlay.requestLayout()
             drawingOverlay.invalidate()
         }

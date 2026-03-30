@@ -44,12 +44,20 @@ object PdfViewerConstants {
     const val COMMAND_RESET_ZOOM = 1
     const val COMMAND_SCROLL_TO_PAGE = 2
     const val COMMAND_CLEAR_STROKES = 3
+    const val COMMAND_UNDO = 4
+    const val COMMAND_REDO = 5
+    const val COMMAND_LOAD_ANNOTATIONS = 6
 
-    fun commandsMap(): Map<String, Int> = MapBuilder.of(
-        "resetZoom", COMMAND_RESET_ZOOM,
-        "scrollToPage", COMMAND_SCROLL_TO_PAGE,
-        "clearStrokes", COMMAND_CLEAR_STROKES
-    )
+    fun commandsMap(): Map<String, Int> {
+        val map = mutableMapOf<String, Int>()
+        map["resetZoom"] = COMMAND_RESET_ZOOM
+        map["scrollToPage"] = COMMAND_SCROLL_TO_PAGE
+        map["clearStrokes"] = COMMAND_CLEAR_STROKES
+        map["undo"] = COMMAND_UNDO
+        map["redo"] = COMMAND_REDO
+        map["loadAnnotations"] = COMMAND_LOAD_ANNOTATIONS
+        return map
+    }
 
     fun bubblingEventTypes(): Map<String, Any> = MapBuilder.builder<String, Any>()
         .put("onPdfError", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onPdfError")))
@@ -60,6 +68,7 @@ object PdfViewerConstants {
         .put("onMiddleClick", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onMiddleClick")))
         .put("onDrawingStart", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingStart")))
         .put("onDrawingEnd", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDrawingEnd")))
+        .put("onUndoStateChange", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onUndoStateChange")))
         .build()
 
     /** Shared findViewByTag + getAnnotations for Module classes */
@@ -244,6 +253,14 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
 
     abstract fun scrollToPage(page: Int, animated: Boolean)
 
+    fun undo() {
+        drawingController.undo()
+    }
+
+    fun redo() {
+        drawingController.redo()
+    }
+
     fun clearStrokes(page: Int) {
         if (page < 0) {
             drawingController.clearAllStrokes()
@@ -257,6 +274,44 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
 
     fun getAnnotations(): WritableMap {
         return drawingController.getAnnotationsForExport()
+    }
+
+    fun loadAnnotations(json: String) {
+        android.util.Log.d("PdfViewer", "[loadAnnotations] json length=${json.length}")
+        val pages = parseAnnotations(json)
+        android.util.Log.d("PdfViewer", "[loadAnnotations] parsed ${pages.size} pages")
+        drawingController.clearAllStrokes()
+        drawingController.clearAllTexts()
+
+        for ((pageIndex, page) in pages.withIndex()) {
+            val drawingStrokes = page.strokes.map { stroke ->
+                DrawingStroke(
+                    id = java.util.UUID.randomUUID().toString(),
+                    color = stroke.color,
+                    width = stroke.width,
+                    opacity = stroke.opacity,
+                    path = stroke.path.map { point ->
+                        android.graphics.PointF(point.getOrElse(0) { 0f }, point.getOrElse(1) { 0f })
+                    }.toMutableList()
+                )
+            }
+            drawingController.setStrokes(drawingStrokes, pageIndex)
+
+            for (text in page.text) {
+                if (text.point.size < 2) continue
+                val drawingText = DrawingText(
+                    id = java.util.UUID.randomUUID().toString(),
+                    color = text.color,
+                    fontSize = text.fontSize,
+                    point = text.point,
+                    str = text.str
+                )
+                drawingController.addText(drawingText, pageIndex)
+            }
+        }
+        drawingController.clearUndoStack()
+        android.util.Log.d("PdfViewer", "[loadAnnotations] done, calling redrawOverlay")
+        redrawOverlay()
     }
 
     // MARK: - PDF Loading
@@ -372,5 +427,12 @@ abstract class PdfViewerBase(context: Context, protected val pdfMutex: Lock) : F
 
     override fun onNeedsRedraw() {
         post { redrawOverlay() }
+    }
+
+    override fun onUndoStateChanged(canUndo: Boolean, canRedo: Boolean) {
+        emitEvent("onUndoStateChange", Arguments.createMap().apply {
+            putBoolean("canUndo", canUndo)
+            putBoolean("canRedo", canRedo)
+        })
     }
 }

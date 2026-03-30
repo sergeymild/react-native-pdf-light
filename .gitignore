@@ -4,7 +4,7 @@
 
 # XDE
 .expo/
-
+example/android/app/.cxx/Debug
 # VSCode
 .vscode/
 jsconfig.json

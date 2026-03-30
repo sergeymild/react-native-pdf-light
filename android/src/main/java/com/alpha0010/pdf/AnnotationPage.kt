@@ -14,6 +14,7 @@ data class PositionedText(
 data class Stroke(
   val color: String,
   val width: Float,
+  val opacity: Float = 1f,
   val path: List<List<Float>>
 )
 

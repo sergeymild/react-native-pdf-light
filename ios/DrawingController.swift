@@ -23,6 +23,9 @@ protocol DrawingControllerDelegate: AnyObject {
 
     /// Called when user taps in text mode to request text input
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int)
+
+    /// Called when undo/redo availability changes
+    func drawingController(_ controller: DrawingController, undoStateChanged canUndo: Bool, canRedo: Bool)
 }
 
 // MARK: - DrawingController
@@ -53,6 +56,14 @@ class DrawingController {
     /// Text annotations organized by page
     private(set) var pageTexts = PageTexts()
 
+    /// Undo/redo stacks
+    private var undoStack: [UndoAction] = []
+    private var redoStack: [UndoAction] = []
+    private let maxUndoStackSize = 50
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
     /// Active stroke being drawn (page index and path points in content coordinates)
     private var activeStroke: (page: Int, path: [CGPoint])?
 
@@ -69,6 +80,7 @@ class DrawingController {
     /// Set all page strokes at once (from JSON prop)
     func setAllStrokes(_ allStrokes: PageStrokes) {
         pageStrokes = allStrokes
+        clearUndoStack()
     }
 
     /// Get strokes for a specific page
@@ -79,12 +91,14 @@ class DrawingController {
     /// Clear strokes for a specific page
     func clearStrokes(forPage page: Int) {
         pageStrokes.clearStrokes(forPage: page)
+        clearUndoStack()
         delegate?.drawingController(self, strokesCleared: page)
     }
 
     /// Clear all strokes
     func clearAllStrokes() {
         pageStrokes.clearAllStrokes()
+        clearUndoStack()
     }
 
     // MARK: - Text Management
@@ -113,6 +127,87 @@ class DrawingController {
         pageTexts.clearAllTexts()
     }
 
+    // MARK: - Undoable Text Operations
+
+    func addTextWithUndo(_ text: DrawingText, toPage page: Int) {
+        pageTexts.addText(text, toPage: page)
+        pushUndoAction(.addText(page: page, text: text))
+    }
+
+    func removeTextWithUndo(withId id: String, onPage page: Int) {
+        guard let text = pageTexts.getTexts(forPage: page).first(where: { $0.id == id }) else { return }
+        _ = pageTexts.removeText(withId: id, fromPage: page)
+        pushUndoAction(.removeText(page: page, text: text))
+    }
+
+    func moveTextWithUndo(withId id: String, fromPoint: [CGFloat], toPoint: [CGFloat], onPage page: Int) {
+        pageTexts.moveText(withId: id, toPoint: toPoint, onPage: page)
+        pushUndoAction(.moveText(page: page, textId: id, fromPoint: fromPoint, toPoint: toPoint))
+    }
+
+    // MARK: - Undo/Redo
+
+    func undo() {
+        guard let action = undoStack.popLast() else { return }
+
+        switch action {
+        case .addStroke(let page, let stroke):
+            _ = pageStrokes.removeStroke(withId: stroke.id, fromPage: page)
+        case .removeStroke(let page, let stroke):
+            pageStrokes.addStroke(stroke, toPage: page)
+        case .addText(let page, let text):
+            _ = pageTexts.removeText(withId: text.id, fromPage: page)
+        case .removeText(let page, let text):
+            pageTexts.addText(text, toPage: page)
+        case .moveText(let page, let textId, let fromPoint, _):
+            pageTexts.moveText(withId: textId, toPoint: fromPoint, onPage: page)
+        }
+
+        redoStack.append(action)
+        notifyUndoStateChanged()
+        delegate?.drawingControllerNeedsRedraw(self)
+    }
+
+    func redo() {
+        guard let action = redoStack.popLast() else { return }
+
+        switch action {
+        case .addStroke(let page, let stroke):
+            pageStrokes.addStroke(stroke, toPage: page)
+        case .removeStroke(let page, let stroke):
+            _ = pageStrokes.removeStroke(withId: stroke.id, fromPage: page)
+        case .addText(let page, let text):
+            pageTexts.addText(text, toPage: page)
+        case .removeText(let page, let text):
+            _ = pageTexts.removeText(withId: text.id, fromPage: page)
+        case .moveText(let page, let textId, _, let toPoint):
+            pageTexts.moveText(withId: textId, toPoint: toPoint, onPage: page)
+        }
+
+        undoStack.append(action)
+        notifyUndoStateChanged()
+        delegate?.drawingControllerNeedsRedraw(self)
+    }
+
+    private func pushUndoAction(_ action: UndoAction) {
+        undoStack.append(action)
+        if undoStack.count > maxUndoStackSize {
+            undoStack.removeFirst()
+        }
+        redoStack.removeAll()
+        notifyUndoStateChanged()
+    }
+
+    func clearUndoStack() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+        notifyUndoStateChanged()
+    }
+
+    private func notifyUndoStateChanged() {
+        delegate?.drawingController(self, undoStateChanged: canUndo, canRedo: canRedo)
+    }
+
     // MARK: - Touch Handling
 
     /// Handle touch began event
@@ -130,11 +225,11 @@ class DrawingController {
             // Try to erase at this point
             eraseStroke(at: point, page: page, contentRect: contentRect)
         } else {
-            // Start drawing
+            // Start drawing (don't redraw yet — wait for first move to avoid
+            // visual flash when a second finger arrives and pinch cancels)
             isDrawing = true
             activeStroke = (page: page, path: [point])
             delegate?.drawingControllerDidStartDrawing(self)
-            delegate?.drawingControllerNeedsRedraw(self)
         }
     }
 
@@ -193,6 +288,7 @@ class DrawingController {
         )
 
         pageStrokes.addStroke(newStroke, toPage: page)
+        pushUndoAction(.addStroke(page: page, stroke: newStroke))
         delegate?.drawingController(self, didAddStroke: newStroke, onPage: page)
     }
 
@@ -202,16 +298,36 @@ class DrawingController {
         let strokes = pageStrokes.getStrokes(forPage: page)
 
         for stroke in strokes.reversed() {
+            // Check distance to points
             for pathPoint in stroke.path {
                 guard pathPoint.count >= 2 else { continue }
                 let strokePoint = CGPoint(x: pathPoint[0], y: pathPoint[1])
                 let dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
                 if dist < threshold {
                     if pageStrokes.removeStroke(withId: stroke.id, fromPage: page) {
+                        pushUndoAction(.removeStroke(page: page, stroke: stroke))
                         delegate?.drawingController(self, didRemoveStroke: stroke.id, onPage: page)
                         delegate?.drawingControllerNeedsRedraw(self)
                     }
                     return
+                }
+            }
+
+            // Check distance to line segments between consecutive points
+            if stroke.path.count >= 2 {
+                for i in 0..<(stroke.path.count - 1) {
+                    guard stroke.path[i].count >= 2, stroke.path[i + 1].count >= 2 else { continue }
+                    let a = CGPoint(x: stroke.path[i][0], y: stroke.path[i][1])
+                    let b = CGPoint(x: stroke.path[i + 1][0], y: stroke.path[i + 1][1])
+                    let dist = distanceToSegment(point: point, segStart: a, segEnd: b)
+                    if dist < threshold {
+                        if pageStrokes.removeStroke(withId: stroke.id, fromPage: page) {
+                            pushUndoAction(.removeStroke(page: page, stroke: stroke))
+                            delegate?.drawingController(self, didRemoveStroke: stroke.id, onPage: page)
+                            delegate?.drawingControllerNeedsRedraw(self)
+                        }
+                        return
+                    }
                 }
             }
         }
@@ -228,15 +344,14 @@ class DrawingController {
                 .font: UIFont.systemFont(ofSize: text.fontSize)
             ]
             let attrStr = NSAttributedString(string: text.str, attributes: attributes)
-            let maxWidth = contentRect.width * (1 - textX)
-            let boundingRect = attrStr.boundingRect(
-                with: CGSize(width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude),
+            let textSize = attrStr.boundingRect(
+                with: CGSize(width: 100000, height: 100000),
                 options: [.usesLineFragmentOrigin],
                 context: nil
-            )
+            ).size
 
-            let normalizedWidth = boundingRect.width / contentRect.width
-            let normalizedHeight = boundingRect.height / contentRect.height
+            let normalizedWidth = textSize.width / contentRect.width
+            let normalizedHeight = textSize.height / contentRect.height
 
             let padding: CGFloat = 0.02
             let hitRect = CGRect(
@@ -248,6 +363,7 @@ class DrawingController {
 
             if hitRect.contains(point) {
                 _ = pageTexts.removeText(withId: text.id, fromPage: page)
+                pushUndoAction(.removeText(page: page, text: text))
                 delegate?.drawingControllerNeedsRedraw(self)
                 return
             }
@@ -448,23 +564,20 @@ class DrawingController {
 
             let x: CGFloat
             let y: CGFloat
-            let maxWidth: CGFloat
 
             if useNormalized && !contentRect.isEmpty {
                 let pt = normalizedToContent(text.point, contentRect: contentRect)
                 x = pt.x
                 y = pt.y
-                maxWidth = contentRect.maxX - pt.x
             } else {
                 x = text.point[0]
                 y = text.point[1]
-                maxWidth = contentRect.width - x
             }
 
             let attributedString = NSAttributedString(string: text.str, attributes: attributes)
-            let drawRect = CGRect(x: x, y: y, width: max(1, maxWidth), height: CGFloat.greatestFiniteMagnitude)
-
-            attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+            // Large width prevents word-wrap; \n still creates line breaks
+            let drawRect = CGRect(x: x, y: y, width: 100000, height: 100000)
+            attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin], context: nil)
         }
     }
 
@@ -491,7 +604,12 @@ class DrawingController {
                     "color": stroke.color,
                     "width": stroke.width,
                     "opacity": stroke.opacity,
-                    "path": simplifyPath(stroke.path)
+                    "path": {
+                        let originalCount = stroke.path.count
+                        let simplified = simplifyPath(stroke.path)
+                        print("[PDF Export] Page \(page) stroke: \(originalCount) points → \(simplified.count) points")
+                        return simplified
+                    }()
                 ]
                 strokesArray.append(strokeDict)
             }
@@ -520,7 +638,7 @@ class DrawingController {
 
     /// Simplify path using Ramer-Douglas-Peucker algorithm
     /// Removes points that don't contribute significantly to the shape
-    private func simplifyPath(_ path: [[CGFloat]], epsilon: CGFloat = 1.5) -> [[CGFloat]] {
+    private func simplifyPath(_ path: [[CGFloat]], epsilon: CGFloat = 0.002) -> [[CGFloat]] {
         guard path.count > 2 else { return path }
 
         // Convert to points for easier processing
@@ -589,6 +707,21 @@ class DrawingController {
     }
 
     // MARK: - Helpers
+
+    /// Distance from point to line segment (clamped to segment, not infinite line)
+    private func distanceToSegment(point: CGPoint, segStart: CGPoint, segEnd: CGPoint) -> CGFloat {
+        let dx = segEnd.x - segStart.x
+        let dy = segEnd.y - segStart.y
+        let lengthSquared = dx * dx + dy * dy
+        if lengthSquared == 0 {
+            return hypot(point.x - segStart.x, point.y - segStart.y)
+        }
+        // Project point onto segment, clamped to [0,1]
+        let t = max(0, min(1, ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared))
+        let projX = segStart.x + t * dx
+        let projY = segStart.y + t * dy
+        return hypot(point.x - projX, point.y - projY)
+    }
 
     private func parseColor(_ hex: String) -> UIColor {
         return UIColor(hexString: hex) ?? .black

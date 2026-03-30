@@ -40,6 +40,7 @@ func centeredContentInset(for scrollView: UIScrollView, extraTop: CGFloat = 0, e
 
 /// Base class for PagingPdfView and ZoomablePdfScrollView.
 /// Contains shared React props, PDF loading, annotation parsing, drawing controller, and stroke management.
+@objc(PdfViewerBase) @objcMembers
 class PdfViewerBase: UIView, DrawingControllerDelegate {
 
     // MARK: - React Props
@@ -87,6 +88,7 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
     @objc var onMiddleClick: RCTDirectEventBlock?
     @objc var onDrawingStart: RCTDirectEventBlock?
     @objc var onDrawingEnd: RCTDirectEventBlock?
+    @objc var onUndoStateChange: RCTDirectEventBlock?
 
     // MARK: - Text Annotation Props
 
@@ -189,14 +191,9 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
         pdfDocument = document
 
         if let firstPage = document.page(at: 1) {
-            let pageBounds = firstPage.getBoxRect(.cropBox)
-            if firstPage.rotationAngle % 180 == 90 {
-                pdfPageWidth = pageBounds.height
-                pdfPageHeight = pageBounds.width
-            } else {
-                pdfPageWidth = pageBounds.width
-                pdfPageHeight = pageBounds.height
-            }
+            let dims = firstPage.effectiveDimensions
+            pdfPageWidth = dims.width
+            pdfPageHeight = dims.height
         }
 
         actualPageCount = document.numberOfPages
@@ -300,6 +297,14 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
         // Override in subclass
     }
 
+    func undo() {
+        drawingController.undo()
+    }
+
+    func redo() {
+        drawingController.redo()
+    }
+
     func clearStrokes(page: Int) {
         if page >= 0 {
             drawingController.clearStrokes(forPage: page)
@@ -313,6 +318,59 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
 
     func getAnnotations() -> [String: Any] {
         return drawingController.getAnnotationsForExport()
+    }
+
+    func loadAnnotations(_ json: String) {
+        guard !json.isEmpty,
+              let data = json.data(using: .utf8) else {
+            print("[loadAnnotations] Empty or invalid JSON")
+            return
+        }
+
+        do {
+            let pages = try JSONDecoder().decode([AnnotationPage].self, from: data)
+            print("[loadAnnotations] Parsed \(pages.count) pages")
+            drawingController.clearAllStrokes()
+            drawingController.clearAllTexts()
+
+            for (pageIndex, page) in pages.enumerated() {
+                let drawingStrokes = page.strokes.map { stroke in
+                    DrawingStroke(
+                        id: UUID().uuidString,
+                        color: stroke.color,
+                        width: stroke.width,
+                        opacity: stroke.opacity ?? 1.0,
+                        path: stroke.path
+                    )
+                }
+                drawingController.setStrokes(drawingStrokes, forPage: pageIndex)
+
+                for text in page.text {
+                    guard text.point.count >= 2 else { continue }
+                    let drawingText = DrawingText(
+                        id: UUID().uuidString,
+                        color: text.color,
+                        fontSize: text.fontSize,
+                        point: text.point,
+                        str: text.str
+                    )
+                    drawingController.addText(drawingText, toPage: pageIndex)
+                }
+
+                if !page.strokes.isEmpty || !page.text.isEmpty {
+                    print("[loadAnnotations] Page \(pageIndex): \(drawingStrokes.count) strokes, \(page.text.count) texts")
+                    if let first = drawingStrokes.first, let firstPoint = first.path.first {
+                        print("[loadAnnotations]   first stroke path[0]=\(firstPoint)")
+                    }
+                }
+            }
+            drawingController.clearUndoStack()
+            redrawCurrentOverlay()
+            print("[loadAnnotations] Done, overlay redrawn")
+        } catch {
+            print("[loadAnnotations] Parse error: \(error)")
+            onPdfError?(["message": "Failed to parse loadAnnotations: \(error.localizedDescription)"])
+        }
     }
 
     func clearCache() {
@@ -341,5 +399,9 @@ class PdfViewerBase: UIView, DrawingControllerDelegate {
 
     func drawingController(_ controller: DrawingController, didRequestTextInputAt normalizedPoint: CGPoint, onPage page: Int) {
         // Handled by TextAnnotationHandler via touch interception
+    }
+
+    func drawingController(_ controller: DrawingController, undoStateChanged canUndo: Bool, canRedo: Bool) {
+        onUndoStateChange?(["canUndo": canUndo, "canRedo": canRedo])
     }
 }

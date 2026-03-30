@@ -1,11 +1,11 @@
 import React, { forwardRef } from 'react';
 import type { LayoutChangeEvent, ViewStyle } from 'react-native';
 import { NativePagingPdfView } from './NativePagingPdfView';
-import {
-  NativeZoomablePdfScrollView,
-  type NativeZoomablePdfScrollViewRef,
-} from './NativeZoomablePdfScrollView';
+import { NativeZoomablePdfScrollView } from './NativeZoomablePdfScrollView';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
+import type { AnnotationPage, PdfViewerRef } from './types';
+
+export type { AnnotationStroke, AnnotationText, AnnotationPage, PdfViewerRef } from './types';
 
 // --- Unified Event Types ---
 
@@ -15,46 +15,6 @@ export type PdfLoadCompleteEvent = {
   width: number;
   height: number;
   pageCount: number;
-};
-
-// --- Annotation Types ---
-
-/**
- * A stroke (line) annotation with normalized coordinates (0-1).
- */
-export type AnnotationStroke = {
-  /** Unique identifier (required for user-drawn strokes, optional for static) */
-  id?: string;
-  /** Hex color string (e.g., "#ff0000") */
-  color: string;
-  /** Line width in points */
-  width: number;
-  /** Stroke opacity 0-1 (default 1) */
-  opacity?: number;
-  /** Array of [x, y] points, normalized 0-1 relative to page dimensions */
-  path: number[][];
-};
-
-/**
- * A text annotation with normalized position (0-1).
- */
-export type AnnotationText = {
-  /** Hex color string (e.g., "#000000") */
-  color: string;
-  /** Font size in points */
-  fontSize: number;
-  /** Position [x, y], normalized 0-1 relative to page dimensions */
-  point: number[];
-  /** Text content */
-  str: string;
-};
-
-/**
- * Annotations for a single page.
- */
-export type AnnotationPage = {
-  strokes: AnnotationStroke[];
-  text: AnnotationText[];
 };
 
 // --- Common Props ---
@@ -160,27 +120,9 @@ type PdfViewerCommonProps = {
   onDrawingEnd?: () => void;
 
   /**
-   * Callback when a stroke is completed.
-   * Add the stroke to your annotations[page].strokes array.
-   * The stroke has required id and opacity fields.
+   * Callback when undo/redo availability changes.
    */
-  onStrokeEnd?: (
-    stroke: AnnotationStroke & { id: string; opacity: number },
-    page: number
-  ) => void;
-
-  /**
-   * Callback when a stroke is removed (erased).
-   * Remove the stroke with this id from annotations[page].strokes.
-   */
-  onStrokeRemoved?: (strokeId: string, page: number) => void;
-
-  /**
-   * Callback when strokes are cleared.
-   * Clear annotations[page].strokes array.
-   */
-  onStrokesCleared?: (page: number) => void;
-
+  onUndoStateChange?: (state: { canUndo: boolean; canRedo: boolean }) => void;
 
   style?: ViewStyle;
 };
@@ -206,8 +148,6 @@ type PagingViewerProps = PdfViewerCommonProps & {
 };
 
 export type PdfViewerProps = ZoomableViewerProps | PagingViewerProps;
-
-export type PdfViewerRef = NativeZoomablePdfScrollViewRef;
 
 export const PdfViewer = forwardRef<PdfViewerRef, PdfViewerProps>(
   (props, ref) => {

@@ -10,12 +10,14 @@ import {
   NativeSyntheticEvent,
   NativeModules,
   processColor,
-  requireNativeComponent,
-  UIManager,
   ViewStyle,
 } from 'react-native';
+import RNZoomablePdfScrollViewNative, {
+  Commands as ZoomableCommands,
+} from './RNZoomablePdfScrollViewNativeComponent';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
+import type { AnnotationPage, PdfViewerRef } from './types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -34,28 +36,6 @@ export type ZoomablePdfZoomChangeEvent = { scale: number };
 
 export type ZoomablePdfTapEvent = {
   position: 'top' | 'bottom' | 'left' | 'right';
-};
-
-// --- Annotation Types ---
-
-export type AnnotationStroke = {
-  id?: string;
-  color: string;
-  width: number;
-  opacity?: number;
-  path: number[][];
-};
-
-export type AnnotationText = {
-  color: string;
-  fontSize: number;
-  point: number[];
-  str: string;
-};
-
-export type AnnotationPage = {
-  strokes: AnnotationStroke[];
-  text: AnnotationText[];
 };
 
 // --- Native Props ---
@@ -97,6 +77,9 @@ type NativeZoomablePdfScrollViewProps = {
   // Drawing events
   onDrawingStart: (event: NativeSyntheticEvent<{}>) => void;
   onDrawingEnd: (event: NativeSyntheticEvent<{}>) => void;
+  onUndoStateChange: (
+    event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>
+  ) => void;
 
   style?: ViewStyle;
 };
@@ -217,44 +200,21 @@ export type NativeZoomablePdfScrollViewProps_Public = {
    */
   onDrawingEnd?: () => void;
 
+  /**
+   * Callback when undo/redo availability changes.
+   */
+  onUndoStateChange?: (state: { canUndo: boolean; canRedo: boolean }) => void;
+
   style?: ViewStyle;
 };
 
 // --- Ref type ---
 
-export type NativeZoomablePdfScrollViewRef = {
-  /**
-   * Reset zoom to default (scale = 1).
-   */
-  resetZoom: () => void;
-
-  /**
-   * Scroll to specific page.
-   */
-  scrollToPage: (page: number, animated?: boolean) => void;
-
-  /**
-   * Clear strokes for a specific page or all pages.
-   * @param page Page index to clear, or -1 to clear all pages.
-   */
-  clearStrokes: (page?: number) => void;
-
-  /**
-   * Get all annotations (strokes and text) from all pages.
-   * Returns a promise with Record<pageIndex, { strokes, text }>.
-   * Annotations are stored natively - use this to retrieve them when needed.
-   */
-  getAnnotations: () => Promise<
-    Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
-  >;
-};
+export type NativeZoomablePdfScrollViewRef = PdfViewerRef;
 
 // --- Native component ---
 
-const RNZoomablePdfScrollView =
-  requireNativeComponent<NativeZoomablePdfScrollViewProps>(
-    'RNZoomablePdfScrollView'
-  );
+const RNZoomablePdfScrollView = RNZoomablePdfScrollViewNative;
 
 /**
  * Native scrollable PDF viewer with global zoom support.
@@ -295,6 +255,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
     onMiddleClick,
     onDrawingStart,
     onDrawingEnd,
+    onUndoStateChange,
     style,
   } = props;
 
@@ -304,29 +265,17 @@ export const NativeZoomablePdfScrollView = forwardRef<
   useImperativeHandle(ref, () => ({
     resetZoom: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'resetZoom', []);
-        }
+        ZoomableCommands.resetZoom(viewRef.current);
       }
     },
     scrollToPage: (page: number, animated = true) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'scrollToPage', [
-            page,
-            animated,
-          ]);
-        }
+        ZoomableCommands.scrollToPage(viewRef.current, page, animated);
       }
     },
     clearStrokes: (page = -1) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
-        }
+        ZoomableCommands.clearStrokes(viewRef.current, page);
       }
     },
     getAnnotations: async () => {
@@ -340,6 +289,21 @@ export const NativeZoomablePdfScrollView = forwardRef<
         }
       }
       return {};
+    },
+    loadAnnotations: (annotations) => {
+      if (viewRef.current) {
+        ZoomableCommands.loadAnnotations(viewRef.current, JSON.stringify(annotations));
+      }
+    },
+    undo: () => {
+      if (viewRef.current) {
+        ZoomableCommands.undo(viewRef.current);
+      }
+    },
+    redo: () => {
+      if (viewRef.current) {
+        ZoomableCommands.redo(viewRef.current);
+      }
     },
   }));
 
@@ -397,6 +361,13 @@ export const NativeZoomablePdfScrollView = forwardRef<
     [onDrawingEnd]
   );
 
+  const handleUndoStateChange = useCallback(
+    (event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>) => {
+      onUndoStateChange?.(event.nativeEvent);
+    },
+    [onUndoStateChange]
+  );
+
   return (
     <RNZoomablePdfScrollView
       ref={viewRef}
@@ -425,6 +396,7 @@ export const NativeZoomablePdfScrollView = forwardRef<
       onMiddleClick={handleMiddleClick}
       onDrawingStart={handleDrawingStart}
       onDrawingEnd={handleDrawingEnd}
+      onUndoStateChange={handleUndoStateChange}
       style={style}
     />
   );

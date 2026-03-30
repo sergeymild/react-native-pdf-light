@@ -151,6 +151,16 @@ class PageStrokes {
 
 // --- Drawing Controller ---
 
+// --- Undo Action ---
+
+sealed class UndoAction {
+    data class AddStroke(val page: Int, val stroke: DrawingStroke) : UndoAction()
+    data class RemoveStroke(val page: Int, val stroke: DrawingStroke) : UndoAction()
+    data class AddText(val page: Int, val text: DrawingText) : UndoAction()
+    data class RemoveText(val page: Int, val text: DrawingText) : UndoAction()
+    data class MoveText(val page: Int, val textId: String, val fromPoint: List<Float>, val toPoint: List<Float>) : UndoAction()
+}
+
 interface DrawingControllerDelegate {
     fun onDrawingStart()
     fun onDrawingEnd()
@@ -158,6 +168,7 @@ interface DrawingControllerDelegate {
     fun onStrokeRemoved(strokeId: String, page: Int)
     fun onStrokesCleared(page: Int)
     fun onNeedsRedraw()
+    fun onUndoStateChanged(canUndo: Boolean, canRedo: Boolean)
 }
 
 class DrawingController {
@@ -173,6 +184,13 @@ class DrawingController {
     private var activeStroke: Pair<Int, MutableList<PointF>>? = null
     var isDrawing: Boolean = false
         private set
+
+    // Undo/redo
+    private val undoStack = mutableListOf<UndoAction>()
+    private val redoStack = mutableListOf<UndoAction>()
+    private val maxUndoStackSize = 50
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
+    val canRedo: Boolean get() = redoStack.isNotEmpty()
 
     // Text props
     var textColor: String = "#0000FF"
@@ -190,11 +208,13 @@ class DrawingController {
 
     fun clearStrokes(forPage: Int) {
         pageStrokes.clearStrokes(forPage)
+        clearUndoStack()
         delegate?.onStrokesCleared(forPage)
     }
 
     fun clearAllStrokes() {
         pageStrokes.clearAllStrokes()
+        clearUndoStack()
     }
 
     // Text management
@@ -219,6 +239,90 @@ class DrawingController {
         pageTexts.clearAllTexts()
     }
 
+    // Undoable text operations
+
+    fun addTextWithUndo(text: DrawingText, toPage: Int) {
+        pageTexts.addText(text, toPage)
+        pushUndoAction(UndoAction.AddText(toPage, text))
+    }
+
+    fun removeTextWithUndo(withId: String, fromPage: Int) {
+        val text = pageTexts.getTexts(fromPage).firstOrNull { it.id == withId } ?: return
+        pageTexts.removeText(withId, fromPage)
+        pushUndoAction(UndoAction.RemoveText(fromPage, text))
+    }
+
+    fun moveTextWithUndo(withId: String, fromPoint: List<Float>, toPoint: List<Float>, onPage: Int) {
+        // Update text position in pageTexts
+        val texts = pageTexts.getTexts(onPage).toMutableList()
+        val index = texts.indexOfFirst { it.id == withId }
+        if (index >= 0) {
+            texts[index] = texts[index].copy(point = toPoint)
+            pageTexts.clearTexts(onPage)
+            texts.forEach { pageTexts.addText(it, onPage) }
+        }
+        pushUndoAction(UndoAction.MoveText(onPage, withId, fromPoint, toPoint))
+    }
+
+    // Undo/Redo
+
+    fun undo() {
+        val action = undoStack.removeLastOrNull() ?: return
+        when (action) {
+            is UndoAction.AddStroke -> pageStrokes.removeStroke(action.stroke.id, action.page)
+            is UndoAction.RemoveStroke -> pageStrokes.addStroke(action.stroke, action.page)
+            is UndoAction.AddText -> pageTexts.removeText(action.text.id, action.page)
+            is UndoAction.RemoveText -> pageTexts.addText(action.text, action.page)
+            is UndoAction.MoveText -> moveTextInternal(action.textId, action.fromPoint, action.page)
+        }
+        redoStack.add(action)
+        notifyUndoStateChanged()
+        delegate?.onNeedsRedraw()
+    }
+
+    fun redo() {
+        val action = redoStack.removeLastOrNull() ?: return
+        when (action) {
+            is UndoAction.AddStroke -> pageStrokes.addStroke(action.stroke, action.page)
+            is UndoAction.RemoveStroke -> pageStrokes.removeStroke(action.stroke.id, action.page)
+            is UndoAction.AddText -> pageTexts.addText(action.text, action.page)
+            is UndoAction.RemoveText -> pageTexts.removeText(action.text.id, action.page)
+            is UndoAction.MoveText -> moveTextInternal(action.textId, action.toPoint, action.page)
+        }
+        undoStack.add(action)
+        notifyUndoStateChanged()
+        delegate?.onNeedsRedraw()
+    }
+
+    private fun moveTextInternal(textId: String, toPoint: List<Float>, page: Int) {
+        val texts = pageTexts.getTexts(page).toMutableList()
+        val index = texts.indexOfFirst { it.id == textId }
+        if (index >= 0) {
+            texts[index] = texts[index].copy(point = toPoint)
+            pageTexts.clearTexts(page)
+            texts.forEach { pageTexts.addText(it, page) }
+        }
+    }
+
+    private fun pushUndoAction(action: UndoAction) {
+        undoStack.add(action)
+        if (undoStack.size > maxUndoStackSize) {
+            undoStack.removeFirst()
+        }
+        redoStack.clear()
+        notifyUndoStateChanged()
+    }
+
+    fun clearUndoStack() {
+        undoStack.clear()
+        redoStack.clear()
+        notifyUndoStateChanged()
+    }
+
+    private fun notifyUndoStateChanged() {
+        delegate?.onUndoStateChanged(canUndo, canRedo)
+    }
+
     // Touch handling
 
     fun handleTouchBegan(point: PointF, page: Int, contentRect: RectF) {
@@ -227,10 +331,11 @@ class DrawingController {
         if (drawingMode == DrawingMode.ERASE) {
             eraseStroke(point, page, contentRect)
         } else {
+            // Don't redraw yet — wait for first move to avoid
+            // visual flash when a second finger arrives and pinch cancels
             isDrawing = true
             activeStroke = Pair(page, mutableListOf(point))
             delegate?.onDrawingStart()
-            delegate?.onNeedsRedraw()
         }
     }
 
@@ -286,6 +391,7 @@ class DrawingController {
         )
 
         pageStrokes.addStroke(newStroke, page)
+        pushUndoAction(UndoAction.AddStroke(page, newStroke))
         delegate?.onStrokeAdded(newStroke, page)
     }
 
@@ -294,14 +400,33 @@ class DrawingController {
         val strokes = pageStrokes.getStrokes(page)
 
         for (stroke in strokes.reversed()) {
+            // Check distance to points
             for (strokePoint in stroke.path) {
                 val dist = hypot(point.x - strokePoint.x, point.y - strokePoint.y)
                 if (dist < threshold) {
                     if (pageStrokes.removeStroke(stroke.id, page)) {
+                        pushUndoAction(UndoAction.RemoveStroke(page, stroke))
                         delegate?.onStrokeRemoved(stroke.id, page)
                         delegate?.onNeedsRedraw()
                     }
                     return
+                }
+            }
+
+            // Check distance to line segments between consecutive points
+            if (stroke.path.size >= 2) {
+                for (i in 0 until stroke.path.size - 1) {
+                    val a = stroke.path[i]
+                    val b = stroke.path[i + 1]
+                    val dist = distanceToSegment(point, a, b)
+                    if (dist < threshold) {
+                        if (pageStrokes.removeStroke(stroke.id, page)) {
+                            pushUndoAction(UndoAction.RemoveStroke(page, stroke))
+                            delegate?.onStrokeRemoved(stroke.id, page)
+                            delegate?.onNeedsRedraw()
+                        }
+                        return
+                    }
                 }
             }
         }
@@ -314,13 +439,20 @@ class DrawingController {
             val textX = text.point[0]
             val textY = text.point[1]
 
-            val paint = Paint().apply {
+            val paint = android.text.TextPaint().apply {
                 textSize = text.fontSize
                 isAntiAlias = true
             }
-            val textWidth = paint.measureText(text.str)
-            val normalizedWidth = if (contentRect.width() > 0) textWidth / contentRect.width() else 0f
-            val normalizedHeight = if (contentRect.height() > 0) text.fontSize / contentRect.height() else 0f
+            val layout = android.text.StaticLayout.Builder.obtain(text.str, 0, text.str.length, paint, 100000)
+                .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .build()
+            var maxLineWidth = 0f
+            for (i in 0 until layout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, layout.getLineWidth(i))
+            }
+            val normalizedWidth = if (contentRect.width() > 0) maxLineWidth / contentRect.width() else 0f
+            val normalizedHeight = if (contentRect.height() > 0) layout.height.toFloat() / contentRect.height() else 0f
 
             val padding = 0.02f
             val hitRect = RectF(
@@ -332,6 +464,7 @@ class DrawingController {
 
             if (hitRect.contains(point.x, point.y)) {
                 pageTexts.removeText(text.id, page)
+                pushUndoAction(UndoAction.RemoveText(page, text))
                 delegate?.onNeedsRedraw()
                 return
             }
@@ -398,6 +531,19 @@ class DrawingController {
         }
 
         return result
+    }
+
+    // Distance from point to line segment (clamped to segment)
+    private fun distanceToSegment(point: PointF, segStart: PointF, segEnd: PointF): Float {
+        val dx = segEnd.x - segStart.x
+        val dy = segEnd.y - segStart.y
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared == 0f) return hypot(point.x - segStart.x, point.y - segStart.y)
+        val t = ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared
+        val clamped = t.coerceIn(0f, 1f)
+        val projX = segStart.x + clamped * dx
+        val projY = segStart.y + clamped * dy
+        return hypot(point.x - projX, point.y - projY)
     }
 
     // Path simplification using Ramer-Douglas-Peucker algorithm
@@ -482,6 +628,7 @@ fun parseAnnotations(json: String?): List<AnnotationPage> {
                 strokes.add(Stroke(
                     color = strokeObj.getString("color"),
                     width = strokeObj.getDouble("width").toFloat(),
+                    opacity = if (strokeObj.has("opacity")) strokeObj.getDouble("opacity").toFloat() else 1f,
                     path = path
                 ))
             }
@@ -519,6 +666,15 @@ fun parseColor(hexColor: String): Int {
     } catch (e: Exception) {
         Color.BLACK
     }
+}
+
+/**
+ * Parses hex color string and applies opacity to produce an Android Color int.
+ */
+fun parseColorWithOpacity(hexColor: String, opacity: Float): Int {
+    val baseColor = parseColor(hexColor)
+    val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+    return Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
 }
 
 /**
@@ -569,30 +725,43 @@ object PdfPageRenderer {
 
                     // Draw strokes
                     for (stroke in annotation.strokes) {
-                        if (stroke.path.size < 2) continue
+                        if (stroke.path.isEmpty()) continue
 
                         val paint = Paint().apply {
                             color = parseColor(stroke.color)
+                            alpha = (stroke.opacity * 255).toInt().coerceIn(0, 255)
                             strokeWidth = stroke.width * 2 // Scale for density
-                            style = Paint.Style.STROKE
                             strokeCap = Paint.Cap.ROUND
                             strokeJoin = Paint.Join.ROUND
                             isAntiAlias = true
                         }
 
-                        val path = Path()
-                        stroke.path.forEachIndexed { index, point ->
+                        if (stroke.path.size == 1) {
+                            // Single point — draw a dot
+                            val point = stroke.path[0]
                             if (point.size >= 2) {
                                 val x = point[0] * viewWidth
                                 val y = point[1] * pageHeight
-                                if (index == 0) {
-                                    path.moveTo(x, y)
-                                } else {
-                                    path.lineTo(x, y)
+                                paint.style = Paint.Style.FILL
+                                val radius = stroke.width
+                                canvas.drawCircle(x, y, radius, paint)
+                            }
+                        } else {
+                            paint.style = Paint.Style.STROKE
+                            val path = Path()
+                            stroke.path.forEachIndexed { index, point ->
+                                if (point.size >= 2) {
+                                    val x = point[0] * viewWidth
+                                    val y = point[1] * pageHeight
+                                    if (index == 0) {
+                                        path.moveTo(x, y)
+                                    } else {
+                                        path.lineTo(x, y)
+                                    }
                                 }
                             }
+                            canvas.drawPath(path, paint)
                         }
-                        canvas.drawPath(path, paint)
                     }
 
                     // Draw text annotations

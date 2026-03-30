@@ -19,7 +19,14 @@
       "Bash(head -20 /Users/sergeigolishnikov/development/react-native-pdf-light/node_modules/@babel/runtime/package.json | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exports:', 'exports' in d\\); print\\('type:', d.get\\('type','none'\\)\\)\" 2>/dev/null; echo \"---\"; head -5 /Users/sergeigolishnikov/development/react-native-pdf-light/node_modules/@babel/runtime/helpers/interopRequireDefault.js)",
       "Bash(python3 -c \"\nimport json\nwith open\\('node_modules/@babel/runtime/package.json'\\) as f:\n    d = json.load\\(f\\)\nprint\\('version:', d.get\\('version'\\)\\)\nprint\\('type:', d.get\\('type', 'none'\\)\\)\nprint\\('has exports:', 'exports' in d\\)\nif 'exports' in d:\n    import json as j\n    print\\(j.dumps\\(d['exports'], indent=2\\)[:500]\\)\n\")",
       "Bash(cd /Users/sergeigolishnikov/development/react-native-pdf-light/example && npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output /tmp/test-bundle.js 2>&1 | tail -20)",
-      "Bash(wc -l /Users/sergeigolishnikov/development/react-native-pdf-light/android/src/main/java/com/alpha0010/pdf/*.kt)"
+      "Bash(wc -l /Users/sergeigolishnikov/development/react-native-pdf-light/android/src/main/java/com/alpha0010/pdf/*.kt)",
+      "Bash(cd:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(./gradlew assembleDebug)",
+      "WebFetch(domain:react-native-community.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }

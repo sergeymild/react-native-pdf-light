@@ -59,10 +59,14 @@ class ZoomablePdfScrollViewManager(private val pdfMutex: Lock) : SimpleViewManag
     override fun getCommandsMap(): Map<String, Int> = PdfViewerConstants.commandsMap()
 
     override fun receiveCommand(view: ZoomablePdfScrollView, commandId: String?, args: ReadableArray?) {
+        android.util.Log.d("PdfViewer", "[receiveCommand] commandId=$commandId argsSize=${args?.size()}")
         when (commandId) {
             "resetZoom" -> view.resetZoom()
             "scrollToPage" -> view.scrollToPage(args?.getInt(0) ?: 0, args?.getBoolean(1) ?: true)
             "clearStrokes" -> view.clearStrokes(args?.getInt(0) ?: -1)
+            "undo" -> view.undo()
+            "redo" -> view.redo()
+            "loadAnnotations" -> view.loadAnnotations(args?.getString(0) ?: "")
         }
     }
 }

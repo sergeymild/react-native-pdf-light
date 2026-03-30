@@ -8,6 +8,7 @@ struct PositionedText: Decodable {
 struct Stroke: Decodable {
     let color: String
     let width: CGFloat
+    let opacity: CGFloat?
     let path: [[CGFloat]]
 }
 

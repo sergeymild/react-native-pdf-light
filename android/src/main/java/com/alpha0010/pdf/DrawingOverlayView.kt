@@ -10,7 +10,6 @@ import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import android.util.Log
 import android.view.View
 import kotlin.math.hypot
 
@@ -57,13 +56,6 @@ class DrawingOverlayView(context: Context) : View(context) {
 
         val controller = drawingController ?: return
 
-        // Debug logging
-        val activeStroke = controller.getActiveStroke()
-        val strokeCount = controller.getStrokes(pageIndex).size
-        Log.d("DrawingOverlay", "onDraw: multiPageMode=$multiPageMode, pageIndex=$pageIndex, " +
-                "width=$width, height=$height, contentRect=$contentRect, zoomScale=$zoomScale, " +
-                "strokes=$strokeCount, activeStroke=${activeStroke != null}")
-
         if (multiPageMode) {
             drawMultiPage(canvas, controller)
         } else {
@@ -72,15 +64,11 @@ class DrawingOverlayView(context: Context) : View(context) {
     }
 
     private fun drawSinglePage(canvas: Canvas, controller: DrawingController) {
-        if (contentRect.isEmpty) {
-            Log.d("DrawingOverlay", "drawSinglePage: contentRect is empty!")
-            return
-        }
+        if (contentRect.isEmpty) return
 
         // Draw completed strokes
         val strokes = controller.getStrokes(pageIndex)
         val activeStroke = controller.getActiveStroke()
-        Log.d("DrawingOverlay", "drawSinglePage: pageIndex=$pageIndex, strokes=${strokes.size}, activeStroke=${activeStroke != null}, contentRect=$contentRect")
 
         for (stroke in strokes) {
             if (stroke.path.isEmpty()) continue
@@ -95,7 +83,6 @@ class DrawingOverlayView(context: Context) : View(context) {
         // Draw active stroke
         activeStroke?.let { (strokePage, path) ->
             if (strokePage == pageIndex && path.isNotEmpty()) {
-                Log.d("DrawingOverlay", "drawSinglePage: drawing active stroke with ${path.size} points")
                 if (path.size == 1) {
                     drawActiveDot(canvas, path[0], controller, contentRect)
                 } else {
@@ -109,10 +96,7 @@ class DrawingOverlayView(context: Context) : View(context) {
     }
 
     private fun drawMultiPage(canvas: Canvas, controller: DrawingController) {
-        if (pageHeight <= 0 || pageCount <= 0) {
-            Log.d("DrawingOverlay", "drawMultiPage: early return - pageHeight=$pageHeight, pageCount=$pageCount")
-            return
-        }
+        if (pageHeight <= 0 || pageCount <= 0) return
 
         // Calculate scaled dimensions for zoom
         val scaledPageHeight = pageHeight * zoomScale
@@ -125,11 +109,6 @@ class DrawingOverlayView(context: Context) : View(context) {
         val firstVisiblePage = ((scrollOffset / pageHeight).toInt()).coerceAtLeast(0)
         val lastVisiblePage = (((scrollOffset + viewHeight / zoomScale) / pageHeight).toInt() + 1).coerceAtMost(pageCount - 1)
 
-        Log.d("DRAW_DEBUG", "=== RENDER ===")
-        Log.d("DRAW_DEBUG", "zoomScale=$zoomScale, scrollOffset=$scrollOffset, scaledScrollOffset=$scaledScrollOffset, offsetX=$offsetX")
-        Log.d("DRAW_DEBUG", "pageHeight=$pageHeight, scaledPageHeight=$scaledPageHeight, scaledWidth=$scaledWidth")
-        Log.d("DRAW_DEBUG", "viewWidth=$width, viewHeight=$height")
-
         // Draw strokes for each visible page
         for (page in firstVisiblePage..lastVisiblePage) {
             // Page position in scaled coordinates
@@ -140,17 +119,6 @@ class DrawingOverlayView(context: Context) : View(context) {
 
             // Draw completed strokes
             val strokes = controller.getStrokes(page)
-            if (strokes.isNotEmpty()) {
-                Log.d("DRAW_DEBUG", "Page $page: pageTop=$pageTop, pageRect=$pageRect, strokes=${strokes.size}")
-                // Log first stroke's first point conversion
-                val firstStroke = strokes.first()
-                if (firstStroke.path.isNotEmpty()) {
-                    val pt = firstStroke.path.first()
-                    val screenX = pageRect.left + pt.x * pageRect.width()
-                    val screenY = pageRect.top + pt.y * pageRect.height()
-                    Log.d("DRAW_DEBUG", "First stroke point: normalized=(${pt.x}, ${pt.y}) -> screen=($screenX, $screenY)")
-                }
-            }
             for (stroke in strokes) {
                 if (stroke.path.isEmpty()) continue
 
@@ -279,11 +247,12 @@ class DrawingOverlayView(context: Context) : View(context) {
 
             val x = rect.left + text.point[0] * rect.width()
             val y = rect.top + text.point[1] * rect.height()
-            val maxWidth = ((1f - text.point[0]) * rect.width() * scale).toInt().coerceAtLeast(1)
+            // Large width prevents word-wrap; \n still creates line breaks
+            val largeWidth = 100000
 
             canvas.save()
             canvas.translate(x, y)
-            val layout = StaticLayout.Builder.obtain(text.str, 0, text.str.length, textPaint, maxWidth)
+            val layout = StaticLayout.Builder.obtain(text.str, 0, text.str.length, textPaint, largeWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setLineSpacing(0f, 1f)
                 .setIncludePad(false)
@@ -293,13 +262,4 @@ class DrawingOverlayView(context: Context) : View(context) {
         }
     }
 
-    private fun parseColorWithOpacity(hexColor: String, opacity: Float): Int {
-        val baseColor = try {
-            Color.parseColor(hexColor)
-        } catch (e: Exception) {
-            Color.BLACK
-        }
-        val alpha = (opacity * 255).toInt().coerceIn(0, 255)
-        return Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
-    }
 }

@@ -16,10 +16,11 @@ export interface PageIndicatorRef {
 export interface PageIndicatorProps {
   initialPage?: number;
   initialPageCount?: number;
+  topInset?: number;
 }
 
 export const PageIndicator = forwardRef<PageIndicatorRef, PageIndicatorProps>(
-  ({ initialPage = 0, initialPageCount = 0 }, ref) => {
+  ({ initialPage = 0, initialPageCount = 0, topInset = 0 }, ref) => {
     const [currentPage, setCurrentPage] = useState(initialPage);
     const [pageCount, setPageCount] = useState(initialPageCount);
 
@@ -50,7 +51,7 @@ export const PageIndicator = forwardRef<PageIndicatorRef, PageIndicatorProps>(
     }
 
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { top: topInset + 8 }]}>
         <Text style={styles.text}>
           {currentPage + 1} / {pageCount}
         </Text>
@@ -62,7 +63,7 @@ export const PageIndicator = forwardRef<PageIndicatorRef, PageIndicatorProps>(
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 50,
+    top: 8,
     alignSelf: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     paddingHorizontal: 12,

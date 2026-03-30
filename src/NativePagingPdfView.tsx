@@ -10,12 +10,14 @@ import {
   NativeSyntheticEvent,
   NativeModules,
   processColor,
-  requireNativeComponent,
-  UIManager,
   ViewStyle,
 } from 'react-native';
+import RNPagingPdfViewNative, {
+  Commands as PagingCommands,
+} from './RNPagingPdfViewNativeComponent';
 import type { DrawingMode, DrawingTool, TextTool } from './drawing/types';
 import { DEFAULT_DRAWING_TOOL, DEFAULT_TEXT_TOOL } from './drawing/types';
+import type { AnnotationPage, PdfViewerRef } from './types';
 import { asPath } from './Util';
 
 // --- Event types ---
@@ -33,28 +35,6 @@ export type PagingPdfPageChangeEvent = { page: number };
 export type PagingPdfZoomChangeEvent = { scale: number };
 
 export type PagingPdfTapEvent = { position: 'top' | 'bottom' | 'left' | 'right' };
-
-// --- Annotation Types ---
-
-export type AnnotationStroke = {
-  id?: string;
-  color: string;
-  width: number;
-  opacity?: number;
-  path: number[][];
-};
-
-export type AnnotationText = {
-  color: string;
-  fontSize: number;
-  point: number[];
-  str: string;
-};
-
-export type AnnotationPage = {
-  strokes: AnnotationStroke[];
-  text: AnnotationText[];
-};
 
 // --- Native Props ---
 
@@ -89,6 +69,9 @@ type NativePagingPdfViewProps = {
   // Drawing events
   onDrawingStart: (event: NativeSyntheticEvent<{}>) => void;
   onDrawingEnd: (event: NativeSyntheticEvent<{}>) => void;
+  onUndoStateChange: (
+    event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>
+  ) => void;
 
   style?: ViewStyle;
 };
@@ -197,42 +180,21 @@ export type NativePagingPdfViewProps_Public = {
    */
   onDrawingEnd?: () => void;
 
+  /**
+   * Callback when undo/redo availability changes.
+   */
+  onUndoStateChange?: (state: { canUndo: boolean; canRedo: boolean }) => void;
+
   style?: ViewStyle;
 };
 
 // --- Ref type ---
 
-export type NativePagingPdfViewRef = {
-  /**
-   * Reset zoom to default (scale = 1).
-   */
-  resetZoom: () => void;
-
-  /**
-   * Scroll to specific page.
-   */
-  scrollToPage: (page: number, animated?: boolean) => void;
-
-  /**
-   * Clear strokes for a specific page or all pages.
-   * @param page Page index to clear, or -1 to clear all pages.
-   */
-  clearStrokes: (page?: number) => void;
-
-  /**
-   * Get all annotations (strokes and text) from all pages.
-   * Returns a promise with Record<pageIndex, { strokes, text }>.
-   * Annotations are stored natively - use this to retrieve them when needed.
-   */
-  getAnnotations: () => Promise<
-    Record<string, { strokes: AnnotationStroke[]; text: AnnotationText[] }>
-  >;
-};
+export type NativePagingPdfViewRef = PdfViewerRef;
 
 // --- Native component ---
 
-const RNPagingPdfView =
-  requireNativeComponent<NativePagingPdfViewProps>('RNPagingPdfView');
+const RNPagingPdfView = RNPagingPdfViewNative;
 
 /**
  * Native paged PDF viewer with per-page zoom support.
@@ -271,6 +233,7 @@ export const NativePagingPdfView = forwardRef<
     onMiddleClick,
     onDrawingStart,
     onDrawingEnd,
+    onUndoStateChange,
     style,
   } = props;
 
@@ -280,29 +243,17 @@ export const NativePagingPdfView = forwardRef<
   useImperativeHandle(ref, () => ({
     resetZoom: () => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'resetZoom', []);
-        }
+        PagingCommands.resetZoom(viewRef.current);
       }
     },
     scrollToPage: (page: number, animated = true) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'scrollToPage', [
-            page,
-            animated,
-          ]);
-        }
+        PagingCommands.scrollToPage(viewRef.current, page, animated);
       }
     },
     clearStrokes: (page = -1) => {
       if (viewRef.current) {
-        const handle = findNodeHandle(viewRef.current);
-        if (handle) {
-          UIManager.dispatchViewManagerCommand(handle, 'clearStrokes', [page]);
-        }
+        PagingCommands.clearStrokes(viewRef.current, page);
       }
     },
     getAnnotations: async () => {
@@ -316,6 +267,21 @@ export const NativePagingPdfView = forwardRef<
         }
       }
       return {};
+    },
+    loadAnnotations: (annotations) => {
+      if (viewRef.current) {
+        PagingCommands.loadAnnotations(viewRef.current, JSON.stringify(annotations));
+      }
+    },
+    undo: () => {
+      if (viewRef.current) {
+        PagingCommands.undo(viewRef.current);
+      }
+    },
+    redo: () => {
+      if (viewRef.current) {
+        PagingCommands.redo(viewRef.current);
+      }
     },
   }));
 
@@ -373,6 +339,13 @@ export const NativePagingPdfView = forwardRef<
     [onDrawingEnd]
   );
 
+  const handleUndoStateChange = useCallback(
+    (event: NativeSyntheticEvent<{ canUndo: boolean; canRedo: boolean }>) => {
+      onUndoStateChange?.(event.nativeEvent);
+    },
+    [onUndoStateChange]
+  );
+
   return (
     <RNPagingPdfView
       ref={viewRef}
@@ -397,6 +370,7 @@ export const NativePagingPdfView = forwardRef<
       onMiddleClick={handleMiddleClick}
       onDrawingStart={handleDrawingStart}
       onDrawingEnd={handleDrawingEnd}
+      onUndoStateChange={handleUndoStateChange}
       style={style}
     />
   );

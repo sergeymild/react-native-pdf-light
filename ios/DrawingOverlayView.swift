@@ -146,6 +146,15 @@ class DrawingOverlayView: UIView {
             return
         }
 
+        // Multiple fingers — cancel drawing, let scroll view handle pinch
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if controller.isDrawing {
+                controller.handleTouchCancelled()
+            }
+            textAnnotationHandler?.handleMultiTouchDetected()
+            return
+        }
+
         // In text mode, delegate to text annotation handler
         if controller.drawingMode == .text, let handler = textAnnotationHandler {
             if handler.handleTouchBegan(touch) { return }
@@ -169,8 +178,17 @@ class DrawingOverlayView: UIView {
             return
         }
 
-        // Handle text dragging
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        // Multiple fingers — cancel any active drawing
+        if let allTouches = event?.allTouches, allTouches.count > 1 {
+            if controller.isDrawing {
+                controller.handleTouchCancelled()
+            }
+            textAnnotationHandler?.handleMultiTouchDetected()
+            return
+        }
+
+        // Handle text dragging or pending text (tap vs drag detection)
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchMoved(touch)
             return
         }
@@ -193,7 +211,7 @@ class DrawingOverlayView: UIView {
             return
         }
 
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchEnded(touch)
             return
         }
@@ -208,7 +226,7 @@ class DrawingOverlayView: UIView {
             return
         }
 
-        if let handler = textAnnotationHandler, handler.isDraggingText {
+        if let handler = textAnnotationHandler, (handler.isDraggingText || handler.hasPendingText) {
             handler.handleTouchCancelled()
             return
         }
