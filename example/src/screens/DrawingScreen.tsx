@@ -10,10 +10,13 @@ import {
   View,
   Text,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import {
   PdfViewer,
   type NativeZoomablePdfScrollViewRef,
@@ -64,6 +67,7 @@ const TOOLS: ToolButton[] = [
 ];
 
 export function DrawingScreen({ onBack }: Props) {
+  const insets = useSafeAreaInsets();
   const source = useAsset(require('../assets/caldara.pdf'));
   const pdfViewRef = useRef<NativeZoomablePdfScrollViewRef>(null);
   const pageIndicatorRef = useRef<PageIndicatorRef>(null);
@@ -216,6 +220,9 @@ export function DrawingScreen({ onBack }: Props) {
         >
           <IcRedo size={20} color="white" />
         </TouchableOpacity>
+        <TouchableOpacity style={styles.floatingButton} onPress={handleSave}>
+          <Text>Sa</Text>
+        </TouchableOpacity>
       </SafeAreaView>
 
       {/* Bottom toolbar */}
@@ -258,6 +265,7 @@ export function DrawingScreen({ onBack }: Props) {
         ref={pageIndicatorRef}
         initialPage={0}
         initialPageCount={0}
+        topInset={insets.top}
       />
 
       {/* Color picker modal */}

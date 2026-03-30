@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Screen = 'paging' | 'zoomable' | 'drawing' | 'preview';
 
@@ -8,8 +9,10 @@ type Props = {
 };
 
 export function HomeScreen({ onNavigate }: Props) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 50 }]}>
       <Text style={styles.title}>PDF Viewer Examples</Text>
       <Text style={styles.subtitle}>Choose a display mode</Text>
 
@@ -60,7 +63,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
-    paddingTop: 100,
+    paddingTop: 50,
     paddingHorizontal: 24,
   },
   title: {

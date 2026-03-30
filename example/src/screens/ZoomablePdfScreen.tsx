@@ -1,5 +1,6 @@
 import React, { useCallback, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PdfViewer,
   type NativeZoomablePdfScrollViewRef,
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function ZoomablePdfScreen({ onBack }: Props) {
+  const insets = useSafeAreaInsets();
   const source = useAsset(require('../assets/caldara.pdf'));
   const pdfViewRef = useRef<NativeZoomablePdfScrollViewRef>(null);
   const pageIndicatorRef = useRef<PageIndicatorRef>(null);
@@ -42,7 +44,7 @@ export function ZoomablePdfScreen({ onBack }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -73,6 +75,7 @@ export function ZoomablePdfScreen({ onBack }: Props) {
         ref={pageIndicatorRef}
         initialPage={0}
         initialPageCount={0}
+        topInset={insets.top}
       />
     </View>
   );
@@ -87,7 +90,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
+    paddingTop: 8,
     paddingHorizontal: 16,
     paddingBottom: 12,
     backgroundColor: '#34C759',

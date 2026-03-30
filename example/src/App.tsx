@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   HomeScreen,
   PagingPdfScreen,
@@ -23,16 +24,23 @@ export default function App() {
     setCurrentScreen('home');
   }, []);
 
+  let screen;
   switch (currentScreen) {
     case 'paging':
-      return <PagingPdfScreen onBack={handleBack} />;
+      screen = <PagingPdfScreen onBack={handleBack} />;
+      break;
     case 'zoomable':
-      return <ZoomablePdfScreen onBack={handleBack} />;
+      screen = <ZoomablePdfScreen onBack={handleBack} />;
+      break;
     case 'drawing':
-      return <DrawingScreen onBack={handleBack} />;
+      screen = <DrawingScreen onBack={handleBack} />;
+      break;
     case 'preview':
-      return <AnnotationsPreviewScreen onBack={handleBack} />;
+      screen = <AnnotationsPreviewScreen onBack={handleBack} />;
+      break;
     default:
-      return <HomeScreen onNavigate={handleNavigate} />;
+      screen = <HomeScreen onNavigate={handleNavigate} />;
   }
+
+  return <SafeAreaProvider>{screen}</SafeAreaProvider>;
 }

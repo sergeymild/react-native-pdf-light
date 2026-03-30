@@ -4,9 +4,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import {
   PdfViewer,
   type AnnotationPage,
@@ -22,6 +25,7 @@ type Props = {
 };
 
 export function AnnotationsPreviewScreen({ onBack }: Props) {
+  const insets = useSafeAreaInsets();
   const source = useAsset(require('../assets/caldara.pdf'));
   const pageIndicatorRef = useRef<PageIndicatorRef>(null);
   const [annotations, setAnnotations] = useState<AnnotationPage[] | undefined>(undefined);
@@ -104,6 +108,7 @@ export function AnnotationsPreviewScreen({ onBack }: Props) {
         ref={pageIndicatorRef}
         initialPage={0}
         initialPageCount={0}
+        topInset={insets.top}
       />
     </SafeAreaView>
   );

@@ -344,8 +344,13 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         }
 
         imageView = ImageView(context).apply {
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-            scaleType = ImageView.ScaleType.FIT_START
+            layoutParams = FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
         }
 
@@ -767,6 +772,11 @@ private class ZoomablePageView(context: Context) : FrameLayout(context) {
         drawingOverlay.zoomScale = scale
 
         drawingOverlay.post {
+            // After layout, imageView.top reflects centering offset from gravity
+            val topOffset = imageView.top.toFloat()
+            if (topOffset > 0f) {
+                drawingOverlay.contentRect = RectF(0f, topOffset, viewWidth, topOffset + viewHeight)
+            }
             drawingOverlay.requestLayout()
             drawingOverlay.invalidate()
         }
